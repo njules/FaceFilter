@@ -19,6 +19,8 @@ module load intel/python/3/2019.4.088
 source /home/mla_group_13/.bashrc
 conda activate mla39
 
+visdom &
+
 python train.py --dataroot ../celeba \
     --name 9_wiki_fine_tune_male \
     --model cycle_gan --gpu_ids -1 \
@@ -27,4 +29,42 @@ python train.py --dataroot ../celeba \
     --pretrained_model_name 9_wiki_fine_tune_male \
     --pretrained_model_subname G_A,G_B,D_A,D_B \
     --pretrained_model_epoch 200 \
-    --epoch_count 100
+    --epoch_count 100 \
+    --display_server localhost \
+    --batch_size 32
+
+python train.py --dataroot ../celeba \
+    --name 9_wiki_fine_tune_male \
+    --model cycle_gan --gpu_ids -1 \
+    --display_freq 5 --print_freq 5 \
+    --use_pretrained_model \
+    --pretrained_model_name 9_wiki_fine_tune_male \
+    --pretrained_model_subname G_A,G_B,D_A,D_B \
+    --pretrained_model_epoch 200 \
+    --epoch_count 100 \
+    --display_server localhost \
+    --batch_size 16
+
+python train.py --dataroot ../celeba \
+    --name 9_wiki_fine_tune_male \
+    --model cycle_gan --gpu_ids -1 \
+    --display_freq 5 --print_freq 5 \
+    --use_pretrained_model \
+    --pretrained_model_name 9_wiki_fine_tune_male \
+    --pretrained_model_subname G_A,G_B,D_A,D_B \
+    --pretrained_model_epoch 200 \
+    --epoch_count 100 \
+    --display_server localhost \
+    --batch_size 8
+
+python train.py --dataroot ../celeba \
+    --name 9_wiki_fine_tune_male \
+    --model cycle_gan --gpu_ids -1 \
+    --display_freq 5 --print_freq 5 \
+    --use_pretrained_model \
+    --pretrained_model_name 9_wiki_fine_tune_male \
+    --pretrained_model_subname G_A,G_B,D_A,D_B \
+    --pretrained_model_epoch 200 \
+    --epoch_count 100 \
+    --display_server localhost \
+    --batch_size 4
