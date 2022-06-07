@@ -3,7 +3,7 @@
 #SBATCH --job-name=CycleGAN
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=s287598@studenti.polito.it
-#SBATCH --workdir=/home/mla_group_13/
+#SBATCH --workdir=/home/mla_group_13/FaceAging-by-cycleGAN
 #SBATCH --partition=cuda
 #SBATCH --time=01:00:00
 #SBATCH --nodes=1
@@ -17,7 +17,7 @@ module load nvidia/cudasdk/10.1
 module load intel/python/3/2019.4.088
 
 source /home/mla_group_13/.bashrc
-conda activate ml-venv
+conda activate mla39
 
 python train.py --dataroot ../celeba \
     --name 9_wiki_fine_tune_male \
