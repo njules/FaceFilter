@@ -1,0 +1,85 @@
+Name: ffhq_aegan_wplus_decoupled
+--------------- Arguments ---------------
+                ada_every: 8                             
+               ada_length: 500000                        
+               ada_target: 0.6                           
+                     arch: stylegan2                     
+                  augment: False                         
+                augment_p: 0                             
+                    batch: 1                             	[default: 16]
+                    cache: None                          
+       channel_multiplier: 2                             
+                     ckpt: None                          
+                  d2_ckpt: None                          
+                   d_ckpt: None                          
+              d_reg_every: 16                            
+                  dataset: imagefolder                   	[default: multires]
+                    debug: False                         
+               decouple_d: True                          	[default: False]
+                   device: cuda                          	[default: None]
+          disc_iter_start: 30000                         
+              distributed: False                         	[default: None]
+                   e_ckpt: None                          
+                 ema_kimg: 5                             	[default: 10]
+               ema_rampup: None                          
+               eval_every: 2000                          	[default: 1000]
+                   g_ckpt: None                          
+                  g_decay: None                          
+              g_reg_every: 0                             	[default: 4]
+                inception: inception_ffhq128.pkl         	[default: None]
+                     iter: 200001                        	[default: 800000]
+                    joint: False                         
+               lambda_adv: 0.1                           
+            lambda_fake_d: 1.0                           
+            lambda_fake_g: 1.0                           
+               lambda_pix: 1.0                           
+             lambda_rec_d: 0.0                           	[default: 1.0]
+             lambda_rec_w: 0.0                           
+       lambda_rec_w_extra: 0                             
+               lambda_vgg: 5e-05                         
+                   latent: 512                           	[default: None]
+              latent_full: 6144                          	[default: None]
+             latent_space: w                             
+      limit_train_batches: 1                             
+               local_rank: 0                             
+                  log_dir: logs/ffhq_aegan_wplus_decoupled	[default: None]
+                log_every: 500                           	[default: 100]
+                 log_root: logs                          
+                       lr: 0.0025                        	[default: 0.002]
+                   mixing: 0.9                           
+                 n_latent: 12                            	[default: None]
+                  n_mlp_g: 8                             
+                 n_sample: 64                            
+             n_sample_fid: 10000                         	[default: 50000]
+                 n_step_d: 1                             
+                 n_step_e: 1                             
+                     name: ffhq_aegan_wplus_decoupled    	[default: default_exp]
+               nframe_num: 5                             
+                 no_ema_e: False                         
+                 no_ema_g: False                         
+              num_workers: 0                             
+         output_layer_idx: 23                            
+                     path: ../celeba/train_yo            	[default: None]
+        path_batch_shrink: 2                             
+          path_regularize: 2                             
+                 pix_loss: l2                            
+                       r1: 0.2048                        	[default: 10]
+                   resume: False                         
+             sample_cache: None                          
+               save_every: 2000                          	[default: 1000]
+        save_latest_every: 200                           
+                     size: 128                           	[default: 256]
+               start_iter: 0                             	[default: None]
+             stddev_group: 1                             
+       train_from_scratch: False                         
+               truncation: 1                             
+      use_adaptive_weight: False                         
+               use_wscale: False                         
+                 vgg_ckpt: vgg16.pth                     
+                    wandb: False                         
+            which_encoder: style                         
+             which_latent: w_plus                        
+             which_metric: []                            
+              which_phi_d: lin2                          
+              which_phi_e: lin2                          
+------------------ End ------------------

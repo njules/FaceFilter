@@ -3,3 +3,5 @@ img*
 venv
 
 .vscode
+
+tmp
