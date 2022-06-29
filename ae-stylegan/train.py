@@ -271,37 +271,64 @@ def train(args, loader, loader2, generator, encoder, discriminator, discriminato
         if args.debug: util.seed_everything(i)
         real_imgs = [next(loader).to(device) for _ in range(n_step_max)]
 
-        # Train Discriminator
+        ###############################
+        # Part 1: Train Discriminator #
+        ###############################
+
         requires_grad(generator, False)
         requires_grad(encoder, False)
-        requires_grad(discriminator, True)
+        requires_grad(discriminator, True) # <-- only discriminator requires grad
+
+        # train the discriminator for args.n_step_d steps
         for step_index in range(args.n_step_d):
+            # get the real images
             real_img = real_imgs[step_index]
+            # generate some noise...
             noise = mixing_noise(args.batch, args.latent, args.mixing, device)
+            # ...and build images from the noise
             fake_img, _ = generator(noise)
+
+            # possibly augment real and generated images
             if args.augment:
                 real_img_aug, _ = augment(real_img, ada_aug_p)
                 fake_img_aug, _ = augment(fake_img, ada_aug_p)
             else:
                 real_img_aug = real_img
                 fake_img_aug = fake_img
+            
+            # compute classification predictions for both the fake and real images
             fake_pred = discriminator(fake_img_aug)
             real_pred = discriminator(real_img_aug)
+
+            # compute the loss for *fake* and *real* images
+            # NOTE: why softplus and not cross entrop?
             d_loss_fake = F.softplus(fake_pred).mean()
             d_loss_real = F.softplus(-real_pred).mean()
             loss_dict["real_score"] = real_pred.mean()
             loss_dict["fake_score"] = fake_pred.mean()
 
             d_loss_rec = 0.
-            if args.lambda_rec_d > 0 and not args.decouple_d:  # Do not train D on x_rec if decouple_d
+            if args.lambda_rec_d > 0 and not args.decouple_d:
+                # discriminator is trained jointly on generated and reconstructed images
+
+                # encode the real images in the latent space
                 latent_real, _ = encoder(real_img)
+                # reconstruct the original image
                 rec_img, _ = generator([latent_real], input_is_latent=input_is_latent)
+
+                # possibly augment reconstructed images before sending them to the discriminator
                 if args.augment:
                     rec_img, _ = augment(rec_img, ada_aug_p)
+                
+                # compute the discriminator loss on the *reconstructed* images
                 rec_pred = discriminator(rec_img)
                 d_loss_rec = F.softplus(rec_pred).mean()
                 loss_dict["recx_score"] = rec_pred.mean()
 
+            # combine all the three losses together:
+            #  - discriminator loss on real images
+            #  - discriminator loss on fake images (generated from noise)
+            #  - discriminator loss on reconstructed images
             d_loss = d_loss_real + d_loss_fake * args.lambda_fake_d + d_loss_rec * args.lambda_rec_d
             loss_dict["d"] = d_loss
 
@@ -312,40 +339,66 @@ def train(args, loader, loader2, generator, encoder, discriminator, discriminato
         if args.augment and args.augment_p == 0:
             ada_aug_p = ada_augment.tune(real_pred)
             r_t_stat = ada_augment.r_t_stat
+        
         # Compute batchwise r_t
         r_t_dict['real'] = torch.sign(real_pred).sum().item() / args.batch
         r_t_dict['fake'] = torch.sign(fake_pred).sum().item() / args.batch
 
+        # Regularization step: compute the R1 loss on the predictions computed
+        # by the discriminator on real images.
+        # R1 regularization is a regularization technique and gradient penalty 
+        # for training generative adversarial networks. It penalizes the discriminator 
+        # from deviating from the Nash Equilibrium via penalizing the gradient on real 
+        # data alone: when the generator distribution produces the true data distribution 
+        # and the discriminator is equal to 0 on the data manifold, the gradient penalty 
+        # ensures that the discriminator cannot create a non-zero gradient orthogonal to 
+        # the data manifold without suffering a loss in the GAN game.
+        # See https://paperswithcode.com/method/r1-regularization
         d_regularize = args.d_reg_every > 0 and i % args.d_reg_every == 0
         if d_regularize:
-            real_img.requires_grad = True
+            real_img.requires_grad = True # why?
+            
             if args.augment:
                 real_img_aug, _ = augment(real_img, ada_aug_p)
             else:
                 real_img_aug = real_img
+            
             real_pred = discriminator(real_img_aug)
             r1_loss = d_r1_loss(real_pred, real_img)
+
             discriminator.zero_grad()
             (args.r1 / 2 * r1_loss * args.d_reg_every + 0 * real_pred[0]).backward()
             d_optim.step()
+        
         loss_dict["r1"] = r1_loss
         
         # Train Discriminator2
+        # TODO: given that we are only interested in joint training we could probably remove this
         if args.decouple_d and discriminator2 is not None:
             requires_grad(generator, False)
             requires_grad(encoder, False)
             requires_grad(discriminator2, True)
+
             if args.debug: util.seed_everything(i)
+            
             for step_index in range(args.n_step_e):  # n_step_d2 is same as n_step_e
+                # get the real images
                 real_img = real_imgs[step_index]
+                # encode the real images in the latent space
                 latent_real, _ = encoder(real_img)
+                # reconstruct the images by going back to the original samples
                 rec_img, _ = generator([latent_real], input_is_latent=input_is_latent)
+
                 if args.augment:
                     real_img_aug, _ = augment(real_img, ada_aug_p2)
                     rec_img_aug, _ = augment(rec_img, ada_aug_p2)
                 else:
                     real_img_aug = real_img
                     rec_img_aug = rec_img
+                
+                # compute the discriminator loss for the original samples
+                # and the reconstructed images
+                # NOTE: why are we using F.softplus instead of cross entropy as usual?
                 rec_pred = discriminator2(rec_img_aug)
                 real_pred = discriminator2(real_img_aug)
                 d2_loss_rec = F.softplus(rec_pred).mean()
@@ -373,28 +426,47 @@ def train(args, loader, loader2, generator, encoder, discriminator, discriminato
 
         r_t_dict['recx'] = torch.sign(rec_pred).sum().item() / args.batch
 
-        # Train Encoder
+        #########################
+        # Part 2: train Encoder #
+        #########################
+
         joint = args.joint and g_scale > 1e-6
         requires_grad(encoder, True)
         requires_grad(generator, joint)
         requires_grad(discriminator, False)
         requires_grad(discriminator2, False)
+
         if args.debug: util.seed_everything(i)
+
         pix_loss = vgg_loss = adv_loss = torch.tensor(0., device=device)
+        
+        # train the encoder and the generator for args.n_step_e steps
         for step_index in range(args.n_step_e):
+            # get the real images
             real_img = real_imgs[step_index]
+            # map the real images into the latent space
             latent_real, _ = encoder(real_img)
+            # reconstruct the original images
             rec_img, _ = generator([latent_real], input_is_latent=input_is_latent)
+
+            # compute one or more losses on the reconstructed images and the original ones
+
             if args.lambda_pix > 0:
+                # pixel to pixel difference of reconstructed and real image
                 if args.pix_loss == 'l2':
                     pix_loss = torch.mean((rec_img - real_img) ** 2)
                 elif args.pix_loss == 'l1':
                     pix_loss = F.l1_loss(rec_img, real_img)
                 else:
                     raise NotImplementedError
+            
             if args.lambda_vgg > 0:
+                # use a vgg network to compute the difference between the features of real
+                # and reconstructed images
                 vgg_loss = torch.mean((vggnet(real_img) - vggnet(rec_img)) ** 2)
+            
             if args.lambda_adv > 0:
+                # usual adversarial loss
                 if not args.decouple_d:
                     if args.augment:
                         rec_img_aug, _ = augment(rec_img, ada_aug_p)
@@ -416,19 +488,29 @@ def train(args, loader, loader2, generator, encoder, discriminator, discriminato
 
             rec_w_loss = 0
             if args.lambda_rec_w > 0:
+                # TODO: what is mixing prob? what is which_latent?
                 mixing_prob = 0 if args.which_latent == 'w_tied' else args.mixing
                 noise = mixing_noise(args.batch, args.latent, mixing_prob, device)
                 fake_img, latent_fake = generator(noise, return_latents=True, detach_style=True)
+                
                 if args.which_latent == 'w_tied':
                     latent_fake = latent_fake[:,0,:]
                 else:
                     latent_fake = latent_fake.view(args.batch, -1)
+
+                # encode the fake image generated from the decoder starting from noise...
                 latent_pred, _ = encoder(fake_img)
+                # ...and compute a loss function between the latent representation of the
+                # generated images as computed by the encoder and the actual latent representation
                 rec_w_loss = torch.mean((latent_pred - latent_fake.detach()) ** 2)
 
+            # combine all the components of the autoencoder loss
             ae_loss = (
+                # pixel to pixel loss between reconstructed and real images
                 pix_loss * args.lambda_pix + vgg_loss * args.lambda_vgg + 
+                # adversarial loss for the reconstructed images
                 d_weight * adv_loss * args.lambda_adv + 
+                # latent reconstruction loss (noise -> image -> noise)
                 rec_w_loss * args.lambda_rec_w
             )
             loss_dict["ae"] = ae_loss
@@ -450,16 +532,27 @@ def train(args, loader, loader2, generator, encoder, discriminator, discriminato
                 ae_loss.backward()
                 e_optim.step()
 
-        # Train Generator
-        requires_grad(generator, True)
+        ###########################
+        # Part 2: train generator #
+        ###########################
+
+        requires_grad(generator, True) # <-- only generator requires grad
         requires_grad(encoder, False)
         requires_grad(discriminator, False)
         requires_grad(discriminator2, False)
+
         if args.debug: util.seed_everything(i)
+        
+        # create random noise
         noise = mixing_noise(args.batch, args.latent, args.mixing, device)
+        # generate images from the noise
         fake_img, _ = generator(noise)
+
         if args.augment:
             fake_img, _ = augment(fake_img, ada_aug_p)
+
+        # update the generator by computing a softplus loss function on the
+        # output of the discriminator
         fake_pred = discriminator(fake_img)
         g_loss_fake = g_nonsaturating_loss(fake_pred)
         loss_dict["g"] = g_loss_fake
@@ -467,6 +560,7 @@ def train(args, loader, loader2, generator, encoder, discriminator, discriminato
         (g_loss_fake * args.lambda_fake_g).backward()
         g_optim.step()
 
+        # TODO: not really sure what's happening here
         g_regularize = args.g_reg_every > 0 and i % args.g_reg_every == 0
         if g_regularize:
             path_batch_size = max(1, args.batch // args.path_batch_shrink)
@@ -481,25 +575,30 @@ def train(args, loader, loader2, generator, encoder, discriminator, discriminato
                 weighted_path_loss += 0 * fake_img[0, 0, 0, 0]
             weighted_path_loss.backward()
             g_optim.step()
-            mean_path_length_avg = (
-                reduce_sum(mean_path_length).item() / get_world_size()
-            )
+            mean_path_length_avg = reduce_sum(mean_path_length).item() / get_world_size()
+
         loss_dict["path"] = path_loss
         loss_dict["path_length"] = path_lengths.mean()
 
-        # Train Encoder
+        ##################################
+        # Part 3: train encoder (again?) #
+        ##################################
+
         if args.lambda_rec_w_extra > 0:
-            requires_grad(encoder, True)
+            requires_grad(encoder, True) # <- only the encoder requires grad
             requires_grad(generator, False)
             requires_grad(discriminator, False)
             requires_grad(discriminator2, False)
+
             mixing_prob = 0 if args.which_latent == 'w_tied' else args.mixing
             noise = mixing_noise(args.batch, args.latent, mixing_prob, device)
             fake_img, latent_fake = generator(noise, return_latents=True)
+            
             if args.which_latent == 'w_tied':
                 latent_fake = latent_fake[:,0,:]
             else:
                 latent_fake = latent_fake.view(args.batch, -1)
+            
             latent_pred, _ = encoder(fake_img)
             rec_w_loss_extra = torch.mean((latent_pred - latent_fake.detach()) ** 2)
             encoder.zero_grad()
@@ -531,7 +630,7 @@ def train(args, loader, loader2, generator, encoder, discriminator, discriminato
         avg_vgg_loss.update(vgg_loss_val, real_img.shape[0])
 
         if get_rank() == 0:
-            pbar.set_description(
+            print(
                 (
                     f"d: {d_loss_val:.4f}; r1: {r1_val:.4f}; ae: {ae_loss_val:.4f}; "
                     f"g: {g_loss_val:.4f}; path: {path_loss_val:.4f}; mean path: {mean_path_length_avg:.4f}; "
@@ -557,7 +656,7 @@ def train(args, loader, loader2, generator, encoder, discriminator, discriminato
                         os.path.join(args.log_dir, 'sample', f"{str(i).zfill(6)}-recon.png"),
                         nrow=nrow,
                         normalize=True,
-                        value_range=(-1, 1),
+                        # value_range=(-1, 1),
                     )
                     ref_pix_loss = torch.sum(torch.abs(sample_x - rec_real))
                     ref_vgg_loss = torch.mean((vggnet(sample_x) - vggnet(rec_real)) ** 2) if vggnet is not None else 0
@@ -572,7 +671,7 @@ def train(args, loader, loader2, generator, encoder, discriminator, discriminato
                         os.path.join(args.log_dir, 'sample', f"{str(i).zfill(6)}-sample.png"),
                         nrow=nrow,
                         normalize=True,
-                        value_range=(-1, 1),
+                        # value_range=(-1, 1),
                     )
                     # gz_pix_loss = torch.sum(torch.abs(sample_gz - rec_fake))
                     # gz_vgg_loss = torch.mean((vggnet(sample_gz) - vggnet(rec_fake)) ** 2) if vggnet is not None else 0
@@ -689,7 +788,7 @@ def train(args, loader, loader2, generator, encoder, discriminator, discriminato
 
 
 if __name__ == "__main__":
-    device = "cuda"
+    # device = "cuda"
 
     parser = argparse.ArgumentParser(description="StyleGAN2 trainer")
 
@@ -840,9 +939,11 @@ if __name__ == "__main__":
     parser.add_argument("--latent_space", type=str, default='w', help="latent space (w | p | pn | z)")
     parser.add_argument("--lambda_rec_w_extra", type=float, default=0, help="recon sampled w")
 
+    parser.add_argument("--device", type=str, choices=["cpu", "cuda"], default="cuda")
+
     args = parser.parse_args()
     util.seed_everything()
-    args.device = device
+    device = args.device
 
     n_gpu = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
     args.distributed = n_gpu > 1
