@@ -371,7 +371,7 @@ def train(args, loader, loader2, generator, encoder, discriminator, discriminato
             if args.augment and args.augment_p == 0:
                 ada_aug_p2 = ada_augment2.tune(rec_pred)
 
-        r_t_dict['recx'] = torch.sign(rec_pred).sum().item() / args.batch
+        # r_t_dict['recx'] = torch.sign(rec_pred).sum().item() / args.batch
 
         # Train Encoder
         joint = args.joint and g_scale > 1e-6
@@ -522,7 +522,7 @@ def train(args, loader, loader2, generator, encoder, discriminator, discriminato
         path_loss_val = loss_reduced["path"].mean().item()
         real_score_val = loss_reduced["real_score"].mean().item()
         fake_score_val = loss_reduced["fake_score"].mean().item()
-        recx_score_val = loss_reduced["recx_score"].mean().item()
+        recx_score_val = loss_reduced["recx_score"].mean().item() if "recx_score" in loss_reduced else 0
         path_length_val = loss_reduced["path_length"].mean().item()
         pix_loss_val = loss_reduced["pix"].mean().item()
         vgg_loss_val = loss_reduced["vgg"].mean().item()
@@ -531,7 +531,7 @@ def train(args, loader, loader2, generator, encoder, discriminator, discriminato
         avg_vgg_loss.update(vgg_loss_val, real_img.shape[0])
 
         if get_rank() == 0:
-            pbar.set_description(
+            print(
                 (
                     f"d: {d_loss_val:.4f}; r1: {r1_val:.4f}; ae: {ae_loss_val:.4f}; "
                     f"g: {g_loss_val:.4f}; path: {path_loss_val:.4f}; mean path: {mean_path_length_avg:.4f}; "
@@ -557,7 +557,7 @@ def train(args, loader, loader2, generator, encoder, discriminator, discriminato
                         os.path.join(args.log_dir, 'sample', f"{str(i).zfill(6)}-recon.png"),
                         nrow=nrow,
                         normalize=True,
-                        value_range=(-1, 1),
+                        #value_range=(-1, 1),
                     )
                     ref_pix_loss = torch.sum(torch.abs(sample_x - rec_real))
                     ref_vgg_loss = torch.mean((vggnet(sample_x) - vggnet(rec_real)) ** 2) if vggnet is not None else 0
@@ -572,7 +572,7 @@ def train(args, loader, loader2, generator, encoder, discriminator, discriminato
                         os.path.join(args.log_dir, 'sample', f"{str(i).zfill(6)}-sample.png"),
                         nrow=nrow,
                         normalize=True,
-                        value_range=(-1, 1),
+                        # value_range=(-1, 1),
                     )
                     # gz_pix_loss = torch.sum(torch.abs(sample_gz - rec_fake))
                     # gz_vgg_loss = torch.mean((vggnet(sample_gz) - vggnet(rec_fake)) ** 2) if vggnet is not None else 0
@@ -689,10 +689,9 @@ def train(args, loader, loader2, generator, encoder, discriminator, discriminato
 
 
 if __name__ == "__main__":
-    device = "cuda"
-
     parser = argparse.ArgumentParser(description="StyleGAN2 trainer")
 
+    parser.add_argument("--device", type=str, choices=["cpu", "cuda"], default="cuda")
     parser.add_argument("--path", type=str, help="path to the lmdb dataset")
     parser.add_argument("--arch", type=str, default='stylegan2', help="model architectures (stylegan2 | swagan)")
     parser.add_argument("--dataset", type=str, default='multires')
@@ -842,7 +841,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     util.seed_everything()
-    args.device = device
+    # args.device = device
+    device = args.device
 
     n_gpu = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
     args.distributed = n_gpu > 1
@@ -1056,3 +1056,7 @@ if __name__ == "__main__":
         args, loader, loader2, generator, encoder, discriminator, discriminator2,
         vggnet, g_optim, e_optim, d_optim, d2_optim, g_ema, e_ema, device
     )
+
+    if torch.cuda.is_available():
+        print(f"Max cuda allocated memory: {torch.cuda.max_memory_allocated()}")
+
