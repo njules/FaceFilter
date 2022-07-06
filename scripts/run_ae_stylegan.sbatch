@@ -42,5 +42,5 @@ python train.py \
 --r1 0.2048 \
 --ema_kimg 5 \
 --disc_iter_start 30000 \
---which_metric fid_sample fid_recon
+# --which_metric fid_sample fid_recon
 
