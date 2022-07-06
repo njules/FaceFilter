@@ -28,15 +28,16 @@ splits = ['A', 'B']
 for partition in partitions:
     for split in ['A', 'B']:
         # os.rmdir(os.path.join(celeba_root, f"{partition}{split}"))
-        os.mkdir(os.path.join(celeba_root, f"{partition}{split}"))
+        os.mkdir(os.path.join(celeba_root, partition+split))
 
     src = os.path.join(celeba_root, partition)
 
     for image in os.listdir(src):
         split = 'B' if images_assignments[image] == -1 else 'A'
-        dst = os.path.join(celeba_root, f"{partition}{split}")
+        print(partition, split)
+        dst = os.path.join(celeba_root, partition+split)
 
-        print(f"{os.path.join(src, image)} --> {os.path.join(dst, image)}")
+        #print(f"{os.path.join(src, image)} --> {os.path.join(dst, image)}")
 
         os.symlink(
             os.path.join(src, image),

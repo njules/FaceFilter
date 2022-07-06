@@ -5,3 +5,5 @@ venv
 .vscode
 
 tmp
+
+__pycache__

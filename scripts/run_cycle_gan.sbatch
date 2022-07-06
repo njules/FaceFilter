@@ -3,7 +3,11 @@
 #SBATCH --job-name=CycleGAN_50
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=s287598@studenti.polito.it
+<<<<<<< HEAD
 #SBATCH --workdir=/home/mla_group_13/FaceFilter/FaceAging-by-cycleGAN
+=======
+#SBATCH --workdir=/home/mla_group_13/FaceAging-by-cycleGAN
+>>>>>>> d50fcbda3f7f977a07c4e1de72ddd397ced64b2e
 #SBATCH --partition=cuda
 #SBATCH --time=100:00:00
 #SBATCH --nodes=1
@@ -28,7 +32,6 @@ BALANCED="_BALANCED"
 mkdir ./checkpoints/9_wiki_fine_tune_male/"$EPOCH"_epochs"$BALANCED" 
 
 echo $CUDA_VISIBLE_DEVICES
-
 python train.py --dataroot ../celeba \
     --name 9_wiki_fine_tune_male \
     --model cycle_gan --gpu_ids 0 \
