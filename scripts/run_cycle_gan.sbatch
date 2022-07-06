@@ -3,11 +3,7 @@
 #SBATCH --job-name=CycleGAN_50
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=s287598@studenti.polito.it
-<<<<<<< HEAD
 #SBATCH --workdir=/home/mla_group_13/FaceFilter/FaceAging-by-cycleGAN
-=======
-#SBATCH --workdir=/home/mla_group_13/FaceAging-by-cycleGAN
->>>>>>> d50fcbda3f7f977a07c4e1de72ddd397ced64b2e
 #SBATCH --partition=cuda
 #SBATCH --time=100:00:00
 #SBATCH --nodes=1
