@@ -938,8 +938,6 @@ if __name__ == "__main__":
     parser.add_argument("--latent_space", type=str, default='w', help="latent space (w | p | pn | z)")
     parser.add_argument("--lambda_rec_w_extra", type=float, default=0, help="recon sampled w")
 
-    parser.add_argument("--device", type=str, choices=["cpu", "cuda"], default="cuda")
-
     args = parser.parse_args()
     util.seed_everything()
     device = args.device

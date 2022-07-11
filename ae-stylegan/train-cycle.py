@@ -61,8 +61,8 @@ def train(args, loader_young, loader_old,
 
         if args.debug: util.seed_everything(i)
 
-        real_young_imgs = next(loader_young)
-        real_old_imgs = next(loader_old)
+        real_young_imgs = next(loader_young)[0]
+        real_old_imgs = next(loader_old)[0]
 
         requires_grad(encoder_young, True)
         requires_grad(generator_young2old, True)
@@ -79,7 +79,7 @@ def train(args, loader_young, loader_old,
         # encode the young images into the latent space
         latent_young_real, _ = encoder_young(real_young_imgs)
         # reconstruct the images in the second domain
-        rec_young2old = generator_young2old(latent_young_real)
+        rec_young2old, _ = generator_young2old([latent_young_real])
         # compute the prediction for the reconstructed images and the real ones
         # TODO: add augmentations?
         real_pred = discriminator_old(real_old_imgs)
@@ -95,7 +95,7 @@ def train(args, loader_young, loader_old,
         # encode the rec. old images into the latent space 
         latent_old_rec, _ = encoder_old(rec_young2old)
         # reconstruct the images in the original domain
-        rec_old2young = generator_old2young(latent_old_rec)
+        rec_old2young, _ = generator_old2young([latent_old_rec])
         # compute the prediction for the reconstructed images and the real ones
         # TODO: add augmentations?
         real_pred = discriminator_young(real_young_imgs)
@@ -127,12 +127,12 @@ def train(args, loader_young, loader_old,
         #  Backpropagation  #
         #####################
 
-        encoder_young.zero_grad()
-        generator_young2old.zero_grad()
-        discriminator_old.zero_grad()
-        encoder_old.zero_grad()
-        generator_old2young.zero_grad()
-        discriminator_young.zero_grad()
+        e_young_optim.zero_grad()
+        g_young2old_optim.zero_grad()
+        d_old_optim.zero_grad()
+        e_old_optim.zero_grad()
+        g_old2young_optim.zero_grad()
+        d_young_optim.zero_grad()
 
         loss = d_young_loss_fake + d_young_loss_real
         loss += d_old_loss_fake + d_old_loss_real
@@ -140,12 +140,12 @@ def train(args, loader_young, loader_old,
         
         loss.backward()
 
-        encoder_young.step()
-        generator_young2old.step()
-        discriminator_old.step()
-        encoder_old.step()
-        generator_old2young.step()
-        discriminator_young.step()
+        e_young_optim.step()
+        g_young2old_optim.step()
+        d_old_optim.step()
+        e_old_optim.step()
+        g_old2young_optim.step()
+        d_young_optim.step()
 
         if get_rank() == 0:
             print(f"d_young_loss_fake: {d_young_loss_fake:.4f}; d_young_loss_real: {d_young_loss_real:.4f}")
@@ -157,7 +157,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="StyleGAN2 trainer")
 
     parser.add_argument("--device", type=str, choices=["cpu", "cuda"], default="cuda")
-    parser.add_argument("--path", type=str, help="path to the lmdb dataset")
+    parser.add_argument("--path-young", type=str, help="path to the lmdb dataset")
+    parser.add_argument("--path-old", type=str, help="path to the lmdb dataset")
     parser.add_argument("--arch", type=str, default='stylegan2', help="model architectures (stylegan2 | swagan)")
     parser.add_argument("--dataset", type=str, default='multires')
     parser.add_argument("--cache", type=str, default=None)
@@ -232,8 +233,6 @@ if __name__ == "__main__":
     parser.add_argument("--which_phi_d", type=str, default='lin2')
     parser.add_argument("--latent_space", type=str, default='w', help="latent space (w | p | pn | z)")
     parser.add_argument("--lambda_rec_w_extra", type=float, default=0, help="recon sampled w")
-
-    parser.add_argument("--device", type=str, choices=["cpu", "cuda"], default="cuda")
 
     args = parser.parse_args()
     util.seed_everything()
