@@ -40,5 +40,11 @@ mv data_loader_cyclegan.py ./FaceAging-by-cycleGAN/data/__init__.py
 # Move the train_cyclegan, if we are on the FaceFilter directory
 mv train_cyclegan.py ./FaceAging-by-cycleGAN/train.py
 
+# Move the image_folder to the place, if we are on the FaceFilter
+mv image_folder_cyclegan.py ./FaceAging-by-cycleGAN/data/image_folder.py
+
 # For the first time, create the output folder
 mkdir experiments_output
+
+## For copy from local to server
+scp -r /path/to/local/dir/ username@{login-node}:/home/username 
