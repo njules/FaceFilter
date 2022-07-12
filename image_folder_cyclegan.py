@@ -24,7 +24,7 @@ IMG_EXTENSIONS = [
     '.BMP',
 ]
 
-MAX_IMAGES = 4000
+MAX_IMAGES = 8000
 
 
 def is_image_file(filename):
