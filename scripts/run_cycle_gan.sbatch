@@ -1,11 +1,11 @@
 #!/bin/bash
 
-#SBATCH --job-name=CycleGAN_50
+#SBATCH --job-name=CycleGAN_01
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=s287598@studenti.polito.it
 #SBATCH --workdir=/home/mla_group_13/FaceFilter/FaceAging-by-cycleGAN
 #SBATCH --partition=cuda
-#SBATCH --time=100:00:00
+#SBATCH --time=00:01:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
@@ -22,12 +22,12 @@ conda activate mla39
 PORT=8103
 visdom -port $PORT &
 
-EPOCH=50
+EPOCH=01
 REM_EPOCH=$((200-$EPOCH))
-BALANCED="_BALANCED"
-mkdir ./checkpoints/9_wiki_fine_tune_male/"$EPOCH"_epochs"$BALANCED" 
+mkdir ./checkpoints/9_wiki_fine_tune_male/"$EPOCH"_epochs
 
 echo $CUDA_VISIBLE_DEVICES
+
 python train.py --dataroot ../celeba \
     --name 9_wiki_fine_tune_male \
     --model cycle_gan --gpu_ids 0 \
@@ -39,7 +39,6 @@ python train.py --dataroot ../celeba \
     --epoch_count $REM_EPOCH \
     --display_server localhost \
     --batch_size 8 \
-    --save_epoch_freq 200 \
-    --display_port $PORT
+    --save_epoch_freq 200
 
-mv ./checkpoints/9_wiki_fine_tune_male/end* ./checkpoints/9_wiki_fine_tune_male/"$EPOCH"_epochs"$BALANCED"
+mv end* ./checkpoints/9_wiki_fine_tune_male/"$EPOCH"_epochs
