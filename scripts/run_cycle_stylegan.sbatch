@@ -19,20 +19,14 @@ module load intel/python/3/2019.4.088
 source /home/mla_group_13/.bashrc
 conda activate env-stylegan
 
-device="cuda"
-if [ -z $CUDA_VISIBLE_DEVICES ]; then
-    device="cpu"
-fi
-
-python train.py \
---path /home/mla_group_13/FaceFilter/celeba/train_ab \
+python train-cycle.py \
+--path-young /home/mla_group_13/FaceFilter/celeba/cycle_train/a \
 --which_latent w_plus \
+--path-old /home/mla_group_13/FaceFilter/celeba/cycle_train/b \
 --log_root /home/mla_group_13/experiments_output/ae-stylegan_$SLURM_JOB_ID/ \
---resume \
---ckpt /home/mla_group_13/experiments_output/ae-stylegan_263984/ffhq_aegan_wplus_joint/weight/012000.pt \
---n_step_e 32 \
+--ckpt /home/mla_group_13/experiments_output/ae-stylegan_263224/ffhq_aegan_wplus_joint/weight/ \
 --lambda_rec_w 0 \
---iter 25000 \
+--iter 2500 \
 --size 128 \
 --name ffhq_aegan_wplus_joint \
 --log_every 100 \
@@ -45,11 +39,11 @@ python train.py \
 --lambda_fake_d 0.9 \
 --lambda_fake_g 0.9 \
 --g_reg_every 0 \
---batch 16 \
+--batch 4 \
 --lr 0.0025 \
 --r1 0.2048 \
 --ema_kimg 5 \
 --disc_iter_start 30000 \
---device $device
+--device cpu
 # --which_metric fid_sample fid_recon
 
