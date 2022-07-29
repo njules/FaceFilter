@@ -157,8 +157,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="StyleGAN2 trainer")
 
     parser.add_argument("--device", type=str, choices=["cpu", "cuda"], default="cuda")
-    parser.add_argument("--path-young", type=str, help="path to the lmdb dataset")
-    parser.add_argument("--path-old", type=str, help="path to the lmdb dataset")
+    parser.add_argument("--path", type=str, help="path to the celeba dataset")
     parser.add_argument("--arch", type=str, default='stylegan2', help="model architectures (stylegan2 | swagan)")
     parser.add_argument("--dataset", type=str, default='multires')
     parser.add_argument("--cache", type=str, default=None)
