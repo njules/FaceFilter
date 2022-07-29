@@ -9,7 +9,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
-#SBATCH --output=/home/mla_group_13/experiments_output/ae-stylegan_%j.log
+#SBATCH --output=/home/mla_group_13/experiments_output/cycle-stylegan_%j.log
 #SBATCH --mem=8G
 #SBATCH --gres=gpu:1
 
@@ -20,10 +20,9 @@ source /home/mla_group_13/.bashrc
 conda activate env-stylegan
 
 python train-cycle.py \
---path-young /home/mla_group_13/FaceFilter/celeba/cycle_train/a \
+--path /home/mla_group_13/FaceFilter/celeba/train_ab \
 --which_latent w_plus \
---path-old /home/mla_group_13/FaceFilter/celeba/cycle_train/b \
---log_root /home/mla_group_13/experiments_output/ae-stylegan_$SLURM_JOB_ID/ \
+--log_root /home/mla_group_13/experiments_output/cycle-stylegan_$SLURM_JOB_ID/ \
 --ckpt /home/mla_group_13/experiments_output/ae-stylegan_263224/ffhq_aegan_wplus_joint/weight/ \
 --lambda_rec_w 0 \
 --iter 2500 \
