@@ -61,8 +61,8 @@ def train(args, loader_young, loader_old,
 
         if args.debug: util.seed_everything(i)
 
-        real_young_imgs = next(loader_young)[0]
-        real_old_imgs = next(loader_old)[0]
+        real_young_imgs = next(loader_young)[0].to(device)
+        real_old_imgs = next(loader_old)[0].to(device)
 
         requires_grad(encoder_young, True)
         requires_grad(generator_young2old, True)
