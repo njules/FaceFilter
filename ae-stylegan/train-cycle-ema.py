@@ -22,7 +22,7 @@ st = pdb.set_trace
 from dataset import get_image_dataset
 from distributed import get_rank, synchronize
 
-from train import load_real_samples, requires_grad, data_sampler, accumulate
+from train import load_real_samples, requires_grad, data_sampler, accumulate, d_r1_loss
 
 
 #@torch.no_grad()
@@ -54,10 +54,6 @@ def train(args, loader_young, loader_old,
             with open(os.path.join(args.log_dir, 'log.txt'), 'a+') as f:
                 f.write(f"Name: {getattr(args, 'name', 'NA')}\n{'-'*50}\n")
 
-    #pbar = range(args.iter)
-    #if get_rank() == 0:
-    #    pbar = tqdm(pbar, initial=0, dynamic_ncols=True, smoothing=0.01)
-
     loader_young, loader_old = it.cycle(loader_young), it.cycle(loader_old)
 
     sample_young = load_real_samples(args, loader_young).to(device)
@@ -70,8 +66,6 @@ def train(args, loader_young, loader_old,
             print("Done!")
             break
        
-        #print(f"Step {idx}")
-
         if args.debug: util.seed_everything(i)
 
         real_young_imgs = next(loader_young)[0].to(device)
@@ -109,6 +103,33 @@ def train(args, loader_young, loader_old,
 
         (F.softplus(fake_pred).mean() + F.softplus(-real_pred).mean()).backward()
         d_young_optim.step()
+
+
+        d_regularize = args.d_reg_every > 0 and i % args.d_reg_every == 0
+        if d_regularize:
+            real_old_imgs.requires_grad = True
+            real_young_imgs.requires_grad = True
+
+            # regularize discriminator old
+            real_pred = discriminator_old(real_old_imgs)
+            r1_loss = d_r1_loss(real_pred, real_old_imgs)
+
+            discriminator_old.zero_grad()
+            (args.r1 / 2 * r1_loss * args.d_reg_every + 0 * real_pred[0]).backward()
+            d_old_optim.step()
+
+            # regularize discriminator young
+            real_pred = discriminator_young(real_young_imgs)
+            r1_loss = d_r1_loss(real_pred, real_young_imgs)
+
+            discriminator_young.zero_grad()
+            (args.r1 / 2 * r1_loss * args.d_reg_every + 0 * real_pred[0]).backward()
+            d_young_optim.step()
+
+            real_old_imgs.requires_grad = False
+            real_young_imgs.requires_grad = False
+            real_old_imgs.grad = None
+            real_young_imgs.grad = None
 
         ###################################################
         #  Part 1: Real Young -> Rec. Old -> Young again  #
@@ -458,8 +479,7 @@ if __name__ == "__main__":
     # Setup discriminators
     discriminator_old = Discriminator(args.size, channel_multiplier=args.channel_multiplier, which_phi=args.which_phi_d).to(device)
     discriminator_young = Discriminator(args.size, channel_multiplier=args.channel_multiplier, which_phi=args.which_phi_d).to(device)
-    # d_reg_ratio = args.d_reg_every / (args.d_reg_every + 1) if args.d_reg_every > 0 else 1.
-    d_reg_ratio = 1
+    d_reg_ratio = args.d_reg_every / (args.d_reg_every + 1) if args.d_reg_every > 0 else 1.
 
     d_old_optim = optim.Adam(
         discriminator_old.parameters(),
