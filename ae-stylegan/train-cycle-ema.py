@@ -77,8 +77,6 @@ def train(args, loader_young, loader_old,
         real_young_imgs = next(loader_young)[0].to(device)
         real_old_imgs = next(loader_old)[0].to(device)
 
-        print(real_young_imgs.shape)
-
         e_young_optim.zero_grad()
         g_young2old_optim.zero_grad()
         d_old_optim.zero_grad()
@@ -88,6 +86,30 @@ def train(args, loader_young, loader_old,
 
         loss = 0
 
+        ##################################
+        #  Step 0: train discriminators  #
+        ##################################
+
+        requires_grad(discriminator_young, True)
+        requires_grad(discriminator_old, True)
+
+        # train discriminator old
+        real_pred = discriminator_old(real_old_imgs)
+        fake_pred = discriminator_old(real_young_imgs)
+
+        (F.softplus(fake_pred).mean() + F.softplus(-real_pred).mean()).backward()
+        d_old_optim.step()
+
+        # train discriminator young
+        real_pred = discriminator_young(real_young_imgs)
+        fake_pred = discriminator_young(real_old_imgs)
+
+        d_young_loss_fake = F.softplus(fake_pred).mean()
+        d_young_loss_real = F.softplus(-real_pred).mean()
+
+        (F.softplus(fake_pred).mean() + F.softplus(-real_pred).mean()).backward()
+        d_young_optim.step()
+
         ###################################################
         #  Part 1: Real Young -> Rec. Old -> Young again  #
         ###################################################
@@ -95,7 +117,7 @@ def train(args, loader_young, loader_old,
         # train the first half of the network
         requires_grad(encoder_young, True)
         requires_grad(generator_young2old, True)
-        requires_grad(discriminator_old, True)
+        requires_grad(discriminator_old, False)
 
         requires_grad(encoder_old, False)
         requires_grad(generator_old2young, False)
@@ -111,11 +133,10 @@ def train(args, loader_young, loader_old,
         rec_young, _ = checkpoint(ft.partial(generator_old2young_ema, input_is_latent=True), latent_old_rec)
         
         # compute the prediction for the reconstructed images and the real ones
-        real_pred = discriminator_old(real_old_imgs)
+        # real_pred = discriminator_old(real_old_imgs)
         fake_pred = checkpoint(discriminator_old, rec_young2old)
 
-        d_old_loss_fake = F.softplus(fake_pred).mean()
-        d_old_loss_real = F.softplus(-real_pred).mean()
+        adv_loss = F.softplus(-fake_pred).mean()
 
         # Reconstruction loss
         pix_loss, vgg_loss = 0, 0
@@ -133,12 +154,12 @@ def train(args, loader_young, loader_old,
             # and reconstructed images
             vgg_loss = torch.mean((vggnet(real_young_imgs) - vggnet(rec_young)) ** 2)
 
-        (d_old_loss_fake + d_old_loss_real + args.lambda_pix * pix_loss + args.lambda_vgg * vgg_loss).backward()
+        (args.lambda_adv * adv_loss + args.lambda_pix * pix_loss + args.lambda_vgg * vgg_loss).backward()
         e_young_optim.step()
         g_young2old_optim.step()
         d_old_optim.step()
 
-        print(f"First step: {d_old_loss_fake} - {d_old_loss_real} - {pix_loss}")
+        print(f"[{i:4d}/{args.iter:4d}] First step: adv_loss={adv_loss:.5f}, pix_loss={pix_loss:.5f}")
         
         #################################################
         #  Part 2: Real Old -> Rec. Young -> Old again  #
@@ -151,7 +172,7 @@ def train(args, loader_young, loader_old,
 
         requires_grad(encoder_old, True)
         requires_grad(generator_old2young, True)
-        requires_grad(discriminator_young, True)
+        requires_grad(discriminator_young, False)
 
         # encode the old images into the latent space
         latent_old_real, _ = encoder_old(real_old_imgs)
@@ -163,11 +184,10 @@ def train(args, loader_young, loader_old,
         rec_old, _ = checkpoint(ft.partial(generator_young2old_ema, input_is_latent=True), latent_young_rec)
         
         # compute the prediction for the reconstructed images and the real ones
-        real_pred = discriminator_young(real_young_imgs)
+        # real_pred = discriminator_young(real_young_imgs)
         fake_pred = checkpoint(discriminator_young, rec_old2young)
 
-        d_young_loss_fake = F.softplus(fake_pred).mean()
-        d_young_loss_real = F.softplus(-real_pred).mean()
+        adv_loss = F.softplus(-fake_pred).mean()
 
         # Reconstruction loss
         pix_loss, vgg_loss = 0, 0
@@ -184,12 +204,12 @@ def train(args, loader_young, loader_old,
             # and reconstructed images
             vgg_loss = torch.mean((vggnet(real_old_imgs) - vggnet(rec_old)) ** 2)
 
-        (d_young_loss_fake + d_young_loss_real + args.lambda_pix * pix_loss + args.lambda_vgg * vgg_loss).backward()
+        (args.lambda_adv * adv_loss + args.lambda_pix * pix_loss + args.lambda_vgg * vgg_loss).backward()
         e_old_optim.step()
         g_old2young_optim.step()
         d_young_optim.step()
 
-        print(f"Second step: {d_young_loss_fake} - {d_young_loss_real} - {pix_loss}")
+        print(f"[{i:4d}/{args.iter:4d}] Second step: adv_loss={adv_loss:.5f}, pix_loss={pix_loss:.5f}")
 
         # Update EMA
         ema_nimg = args.ema_kimg * 1000
@@ -588,8 +608,8 @@ if __name__ == "__main__":
     # Create the datasets
     dataset = get_image_dataset(args, args.dataset, args.path, train=True)
 
-    dataset_young = data.Subset(dataset, [idx for idx, _cls in enumerate(dataset.targets) if _cls == 0])
-    dataset_old = data.Subset(dataset, [idx for idx, _cls in enumerate(dataset.targets) if _cls == 1])
+    dataset_young = data.Subset(dataset, [idx for idx, _cls in enumerate(dataset.targets) if _cls == 1])
+    dataset_old = data.Subset(dataset, [idx for idx, _cls in enumerate(dataset.targets) if _cls == 0])
 
     if args.limit_train_batches < 1:
         indices = torch.randperm(len(dataset_young))[:int(args.limit_train_batches * len(dataset_young))]
