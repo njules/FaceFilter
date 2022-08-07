@@ -29,18 +29,29 @@ if [ ! -d $TMPDIR/data/old ]; then
     tar xf $HOME/train_old.tar.gz -C $TMPDIR/data/old
 fi
 
+if [ ! -d $TMPDIR/data-test/young ]; then
+    mkdir -p $TMPDIR/data-test/young
+    tar xf $HOME/test_young.tar.gz -C $TMPDIR/data-test/young
+fi
+
+if [ ! -d $TMPDIR/data-test/old ]; then
+    mkdir -p $TMPDIR/data-test/old
+    tar xf $HOME/test_old.tar.gz -C $TMPDIR/data-test/old
+fi
+
 python train-cycle-ema.py \
 --path $TMPDIR/data \
+--path-test $TMPDIR/data-test \
 --which_latent w_plus \
---log_root /home/mla_group_13/experiments_output/cycle-stylegan_${SLURM_JOB_ID}_b32_regd/ \
+--log_root /home/mla_group_13/experiments_output/cycle-stylegan_${SLURM_JOB_ID}/ \
 --resume \
 --ckpt /home/mla_group_13/experiments_output/ae-stylegan_266738/ffhq_aegan_wplus_joint/weight/075000.pt \
---iter 250 \
+--iter 500 \
 --size 128 \
 --name ffhq_aegan_wplus_joint \
 --log_every 1 \
---save_every 100 \
---eval_every 10 \
+--save_every 200 \
+--eval_every 25 \
 --dataset imagefolder \
 --inception inception_ffhq128.pkl \
 --n_sample_fid 10000 \

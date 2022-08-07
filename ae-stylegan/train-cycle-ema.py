@@ -27,6 +27,7 @@ from train import load_real_samples, requires_grad, data_sampler, accumulate, d_
 
 #@torch.no_grad()
 def train(args, loader_young, loader_old, 
+        test_loader_young, test_loader_old,
         generator_young2old, generator_old2young, 
         generator_young2old_ema, generator_old2young_ema, 
         encoder_young, encoder_old,
@@ -55,9 +56,13 @@ def train(args, loader_young, loader_old,
                 f.write(f"Name: {getattr(args, 'name', 'NA')}\n{'-'*50}\n")
 
     loader_young, loader_old = it.cycle(loader_young), it.cycle(loader_old)
+    test_loader_young, test_loader_old = it.cycle(test_loader_young), it.cycle(test_loader_old)
 
-    sample_young = load_real_samples(args, loader_young).to(device)
-    sample_old = load_real_samples(args, loader_old).to(device)
+    sample_young = load_real_samples(args, test_loader_young).to(device)
+    sample_old = load_real_samples(args, test_loader_old).to(device)
+
+    train_sample_young = load_real_samples(args, loader_young).to(device)
+    train_sample_old = load_real_samples(args, loader_old).to(device)
     
     for idx in range(args.iter): #pbar:
         i = idx
@@ -272,11 +277,9 @@ def train(args, loader_young, loader_old,
                     nrow = int(args.n_sample**0.5)
                     nchw = list(sample_young.shape)[1:]
                     
-                    # Reconstruction of young images
+                    # Reconstruction of test young images
                     latent_x, _ = encoder_young_ema(sample_young)
                     rec_old, _ = generator_young2old_ema([latent_x], input_is_latent=True)
-                    latent_x, _ = encoder_old_ema(rec_old)
-                    rec_young, _ = generator_old2young_ema([latent_x], input_is_latent=True)
                     sample = torch.cat((sample_young.reshape(args.n_sample // nrow, nrow, *nchw), rec_old.reshape(args.n_sample // nrow, nrow, * nchw)), 1)
                     utils.save_image(
                         sample.reshape(2 * args.n_sample, *nchw),
@@ -285,13 +288,35 @@ def train(args, loader_young, loader_old,
                         normalize=True,
                     )
                         
-                    # Reconstruction of old images
+                    # Reconstruction of test old images
                     latent_x, _ = encoder_old_ema(sample_old)
                     rec_young, _ = generator_old2young_ema([latent_x], input_is_latent=True)
                     sample = torch.cat((sample_old.reshape(args.n_sample // nrow, nrow, *nchw), rec_young.reshape(args.n_sample // nrow, nrow, * nchw)), 1)
                     utils.save_image(
                         sample.reshape(2 * args.n_sample, *nchw),
                         os.path.join(args.log_dir, 'sample', f"{str(i).zfill(6)}-old2young.png"),
+                        nrow=nrow,
+                        normalize=True,
+                    )
+                    
+                    # Reconstruction of train young images
+                    latent_x, _ = encoder_young_ema(train_sample_young)
+                    rec_old, _ = generator_young2old_ema([latent_x], input_is_latent=True)
+                    sample = torch.cat((train_sample_young.reshape(args.n_sample // nrow, nrow, *nchw), rec_old.reshape(args.n_sample // nrow, nrow, * nchw)), 1)
+                    utils.save_image(
+                        sample.reshape(2 * args.n_sample, *nchw),
+                        os.path.join(args.log_dir, 'sample', f"{str(i).zfill(6)}-train-young2old.png"),
+                        nrow=nrow,
+                        normalize=True,
+                    )
+                        
+                    # Reconstruction of train old images
+                    latent_x, _ = encoder_old_ema(train_sample_old)
+                    rec_young, _ = generator_old2young_ema([latent_x], input_is_latent=True)
+                    sample = torch.cat((train_sample_old.reshape(args.n_sample // nrow, nrow, *nchw), rec_young.reshape(args.n_sample // nrow, nrow, * nchw)), 1)
+                    utils.save_image(
+                        sample.reshape(2 * args.n_sample, *nchw),
+                        os.path.join(args.log_dir, 'sample', f"{str(i).zfill(6)}-train-old2young.png"),
                         nrow=nrow,
                         normalize=True,
                     )
@@ -302,6 +327,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--device", type=str, choices=["cpu", "cuda"], default="cuda")
     parser.add_argument("--path", type=str, help="path to the celeba dataset")
+    parser.add_argument("--path-test", type=str, help="path to the test part of the celeba dataset")
     parser.add_argument("--arch", type=str, default='stylegan2', help="model architectures (stylegan2 | swagan)")
     parser.add_argument("--dataset", type=str, default='multires')
     parser.add_argument("--cache", type=str, default=None)
@@ -578,7 +604,7 @@ if __name__ == "__main__":
             broadcast_buffers=False,
         )
 
-    # Create the datasets
+    # Create the training datasets
     dataset = get_image_dataset(args, args.dataset, args.path, train=True)
 
     dataset_young = data.Subset(dataset, [idx for idx, _cls in enumerate(dataset.targets) if _cls == 1])
@@ -609,8 +635,31 @@ if __name__ == "__main__":
     print(f"Length of loader_young: {len(loader_young)}")
     print(f"Length of loader_old: {len(loader_old)}")
 
+
+    # Create the test datasets
+    test_dataset = get_image_dataset(args, args.dataset, args.path_test, train=False)
+
+    test_dataset_young = data.Subset(test_dataset, [idx for idx, _cls in enumerate(test_dataset.targets) if _cls == 1])
+    test_dataset_old = data.Subset(test_dataset, [idx for idx, _cls in enumerate(test_dataset.targets) if _cls == 0])
+
+    test_loader_young = data.DataLoader(
+        test_dataset_young,
+        batch_size=args.batch,
+        sampler=data_sampler(test_dataset_young, shuffle=True, distributed=args.distributed),
+        drop_last=True,
+        num_workers=args.num_workers,
+    )
+    test_loader_old = data.DataLoader(
+        test_dataset_old,
+        batch_size=args.batch,
+        sampler=data_sampler(test_dataset_old, shuffle=True, distributed=args.distributed),
+        drop_last=True,
+        num_workers=args.num_workers,
+    )
+
     train(
         args, loader_young, loader_old, 
+        test_loader_young, test_loader_old,
         generator_young2old, generator_old2young, 
         generator_young2old_ema, generator_old2young_ema, 
         encoder_young, encoder_old,
