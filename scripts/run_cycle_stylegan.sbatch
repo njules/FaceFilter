@@ -32,11 +32,10 @@ fi
 python train-cycle-ema.py \
 --path $TMPDIR/data \
 --which_latent w_plus \
---log_root /home/mla_group_13/experiments_output/cycle-stylegan_$SLURM_JOB_ID/ \
+--log_root /home/mla_group_13/experiments_output/cycle-stylegan_${SLURM_JOB_ID}_b32_regd/ \
 --resume \
 --ckpt /home/mla_group_13/experiments_output/ae-stylegan_266738/ffhq_aegan_wplus_joint/weight/075000.pt \
---lambda_rec_w 0 \
---iter 5000 \
+--iter 250 \
 --size 128 \
 --name ffhq_aegan_wplus_joint \
 --log_every 1 \
@@ -45,12 +44,8 @@ python train-cycle-ema.py \
 --dataset imagefolder \
 --inception inception_ffhq128.pkl \
 --n_sample_fid 10000 \
---lambda_rec_d 0.25 \
---lambda_fake_d 0.9 \
---lambda_fake_g 0.9 \
---g_reg_every 0 \
---batch 16 \
---lr 0.001 \
+--batch 32 \
+--lr 0.0001 \
 --r1 0.2048 \
 --ema_kimg 5 \
 --disc_iter_start 30000 \
