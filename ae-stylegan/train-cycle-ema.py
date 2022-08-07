@@ -257,20 +257,6 @@ def train(args, loader_young, loader_old,
         #nn.utils.clip_grad_value_(discriminator_old.parameters(), clip_value=1.0)
         #nn.utils.clip_grad_value_(discriminator_young.parameters(), clip_value=1.0)
 
-        #print("e_young: " + str(any(torch.any(torch.isnan(p.grad)) for p in encoder_young.parameters())))
-        #print("e_old: " + str(any(torch.any(torch.isnan(p.grad)) for p in encoder_old.parameters())))
-        #print("g_old: " + str(any(torch.any(torch.isnan(p.grad)) for p in generator_old2young.parameters())))
-        #print("g_young: " + str(any(torch.any(torch.isnan(p.grad)) for p in generator_young2old.parameters())))
-        #print("d_old: " + str(any(torch.any(torch.isnan(p.grad)) for p in discriminator_old.parameters())))
-        #print("d_young: " + str(any(torch.any(torch.isnan(p.grad)) for p in discriminator_old.parameters())))
-        
-        
-        if get_rank() == 0:
-            #print(f"d_young_loss_fake: {d_young_loss_fake:.4f}; d_young_loss_real: {d_young_loss_real:.4f}")
-            # print(f"d_old_loss_fake: {d_old_loss_fake:.4f}; d_old_loss_real: {d_old_loss_real:.4f}")
-            #print(f"pix_loss: {pix_loss:.4f}; vgg_loss: {vgg_loss:.4f}")
-            pass
-
         if get_rank() == 0:
 
             # Evaluation
@@ -298,14 +284,7 @@ def train(args, loader_young, loader_old,
                         nrow=nrow,
                         normalize=True,
                     )
-                    sample = torch.cat((sample_young.reshape(args.n_sample // nrow, nrow, *nchw), rec_young.reshape(args.n_sample // nrow, nrow, * nchw)), 1)
-                    utils.save_image(
-                        sample.reshape(2 * args.n_sample, *nchw),
-                        os.path.join(args.log_dir, 'sample', f"{str(i).zfill(6)}-recon.png"),
-                        nrow=nrow,
-                        normalize=True,
-                    )
-
+                        
                     # Reconstruction of old images
                     latent_x, _ = encoder_old_ema(sample_old)
                     rec_young, _ = generator_old2young_ema([latent_x], input_is_latent=True)
@@ -316,32 +295,6 @@ def train(args, loader_young, loader_old,
                         nrow=nrow,
                         normalize=True,
                     )
-
-                    # ref_pix_loss = torch.sum(torch.abs(sample_x - rec_real_2))
-                    # ref_vgg_loss = torch.mean(
-                    #     (vggnet(sample_x) -
-                    #      vggnet(rec_real_2))**2) if vggnet is not None else 0
-                    # # Fixed fake samples and reconstructions
-                    # sample_gz, _ = g_ema_young2old([sample_z])
-                    # latent_gz, _ = e_ema_old(sample_gz)
-                    # sample_gz_2, _ = g_ema_old2young([latent_gz_2])
-                    # latent_gz_2, _ = e_ema_young(sample_gz_2)
-                    # rec_fake, _ = g_ema_young2old(
-                    #     [latent_gz_2], input_is_latent=input_is_latent)
-                    # sample = torch.cat(
-                    #     (sample_gz.reshape(args.n_sample // nrow, nrow, *nchw),
-                    #      rec_fake.reshape(args.n_sample // nrow, nrow, *nchw)),
-                    #     1)
-                    # utils.save_image(
-                    #     sample.reshape(2 * args.n_sample, *nchw),
-                    #     os.path.join(args.log_dir, 'sample',
-                    #                  f"{str(i).zfill(6)}-sample.png"),
-                    #     nrow=nrow,
-                    #     normalize=True,
-                    #     # value_range=(-1, 1),
-                    # )
-                    # gz_pix_loss = torch.sum(torch.abs(sample_gz - rec_fake))
-                    # gz_vgg_loss = torch.mean((vggnet(sample_gz) - vggnet(rec_fake)) ** 2) if vggnet is not None else 0
 
 
 if __name__ == "__main__":
