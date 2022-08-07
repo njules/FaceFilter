@@ -22,13 +22,15 @@ st = pdb.set_trace
 from dataset import get_image_dataset
 from distributed import get_rank, synchronize
 
-from train import load_real_samples, requires_grad, data_sampler
+from train import load_real_samples, requires_grad, data_sampler, accumulate
 
 
 #@torch.no_grad()
 def train(args, loader_young, loader_old, 
         generator_young2old, generator_old2young, 
+        generator_young2old_ema, generator_old2young_ema, 
         encoder_young, encoder_old,
+        encoder_young_ema, encoder_old_ema,
         discriminator_young, discriminator_old,
         vggnet, g_young2old_optim, g_old2young_optim, 
         e_young_optim, e_old_optim, 
@@ -52,9 +54,9 @@ def train(args, loader_young, loader_old,
             with open(os.path.join(args.log_dir, 'log.txt'), 'a+') as f:
                 f.write(f"Name: {getattr(args, 'name', 'NA')}\n{'-'*50}\n")
 
-    pbar = range(args.iter)
-    if get_rank() == 0:
-        pbar = tqdm(pbar, initial=0, dynamic_ncols=True, smoothing=0.01)
+    #pbar = range(args.iter)
+    #if get_rank() == 0:
+    #    pbar = tqdm(pbar, initial=0, dynamic_ncols=True, smoothing=0.01)
 
     loader_young, loader_old = it.cycle(loader_young), it.cycle(loader_old)
 
@@ -68,7 +70,7 @@ def train(args, loader_young, loader_old,
             print("Done!")
             break
        
-        print(f"Step {idx}")
+        #print(f"Step {idx}")
 
         if args.debug: util.seed_everything(i)
 
@@ -104,9 +106,9 @@ def train(args, loader_young, loader_old,
         # reconstruct the images in the second domain
         rec_young2old, _ = checkpoint(ft.partial(generator_young2old, input_is_latent=True), latent_young_real)
         # encode the rec. old images into the latent space 
-        latent_old_rec, _ = checkpoint(encoder_old, rec_young2old)
+        latent_old_rec, _ = checkpoint(encoder_old_ema, rec_young2old)
         # reconstruct the images in the original domain
-        rec_young, _ = checkpoint(ft.partial(generator_old2young, input_is_latent=True), latent_old_rec)
+        rec_young, _ = checkpoint(ft.partial(generator_old2young_ema, input_is_latent=True), latent_old_rec)
         
         # compute the prediction for the reconstructed images and the real ones
         real_pred = discriminator_old(real_old_imgs)
@@ -156,9 +158,9 @@ def train(args, loader_young, loader_old,
         # reconstruct the images in the second domain
         rec_old2young, _ = checkpoint(ft.partial(generator_old2young, input_is_latent=True), latent_old_real)
         # encode the rec. young images into the latent space 
-        latent_young_rec, _ = checkpoint(encoder_young, rec_old2young)
+        latent_young_rec, _ = checkpoint(encoder_young_ema, rec_old2young)
         # reconstruct the images in the original domain
-        rec_old, _ = checkpoint(ft.partial(generator_young2old, input_is_latent=True), latent_young_rec)
+        rec_old, _ = checkpoint(ft.partial(generator_young2old_ema, input_is_latent=True), latent_young_rec)
         
         # compute the prediction for the reconstructed images and the real ones
         real_pred = discriminator_young(real_young_imgs)
@@ -188,6 +190,17 @@ def train(args, loader_young, loader_old,
         d_young_optim.step()
 
         print(f"Second step: {d_young_loss_fake} - {d_young_loss_real} - {pix_loss}")
+
+        # Update EMA
+        ema_nimg = args.ema_kimg * 1000
+        if args.ema_rampup is not None:
+            ema_nimg = min(ema_nimg, i * args.batch * args.ema_rampup)
+        accum = 0.5 ** (args.batch / max(ema_nimg, 1e-8))
+        accumulate(generator_young2old_ema, generator_young2old, accum)
+        accumulate(generator_old2young_ema, generator_old2young, accum)
+        accumulate(encoder_old_ema, encoder_old, accum)
+        accumulate(encoder_young_ema, encoder_young, accum)
+     
 
         #####################
         #  Backpropagation  #
@@ -224,19 +237,19 @@ def train(args, loader_young, loader_old,
                 with torch.no_grad():
                     fid_sa = fid_re = fid_sr = 0
 
-                    encoder_old.eval()
-                    encoder_young.eval()
-                    generator_old2young.eval()
-                    generator_young2old.eval()
+                    encoder_old_ema.eval()
+                    encoder_young_ema.eval()
+                    generator_old2young_ema.eval()
+                    generator_young2old_ema.eval()
 
                     nrow = int(args.n_sample**0.5)
                     nchw = list(sample_young.shape)[1:]
                     
                     # Reconstruction of young images
-                    latent_x, _ = encoder_young(sample_young)
-                    rec_old, _ = generator_young2old([latent_x], input_is_latent=True)
-                    latent_x, _ = encoder_old(rec_old)
-                    rec_young, _ = generator_old2young([latent_x], input_is_latent=True)
+                    latent_x, _ = encoder_young_ema(sample_young)
+                    rec_old, _ = generator_young2old_ema([latent_x], input_is_latent=True)
+                    latent_x, _ = encoder_old_ema(rec_old)
+                    rec_young, _ = generator_old2young_ema([latent_x], input_is_latent=True)
                     sample = torch.cat((sample_young.reshape(args.n_sample // nrow, nrow, *nchw), rec_old.reshape(args.n_sample // nrow, nrow, * nchw)), 1)
                     utils.save_image(
                         sample.reshape(2 * args.n_sample, *nchw),
@@ -253,8 +266,8 @@ def train(args, loader_young, loader_old,
                     )
 
                     # Reconstruction of old images
-                    latent_x, _ = encoder_old(sample_old)
-                    rec_young, _ = generator_old2young([latent_x], input_is_latent=True)
+                    latent_x, _ = encoder_old_ema(sample_old)
+                    rec_young, _ = generator_old2young_ema([latent_x], input_is_latent=True)
                     sample = torch.cat((sample_old.reshape(args.n_sample // nrow, nrow, *nchw), rec_young.reshape(args.n_sample // nrow, nrow, * nchw)), 1)
                     utils.save_image(
                         sample.reshape(2 * args.n_sample, *nchw),
@@ -406,6 +419,8 @@ if __name__ == "__main__":
     # Setup generators
     generator_young2old = Generator(args.size, args.latent, args.n_mlp_g, channel_multiplier=args.channel_multiplier).to(device)
     generator_old2young = Generator(args.size, args.latent, args.n_mlp_g, channel_multiplier=args.channel_multiplier).to(device)
+    generator_young2old_ema = Generator(args.size, args.latent, args.n_mlp_g, channel_multiplier=args.channel_multiplier).to(device)
+    generator_old2young_ema = Generator(args.size, args.latent, args.n_mlp_g, channel_multiplier=args.channel_multiplier).to(device)
     #g_reg_ratio = args.g_reg_every / (args.g_reg_every + 1) if args.g_reg_every > 0 else 1.
     g_reg_ratio = 1 # 0.01
 
@@ -447,6 +462,13 @@ if __name__ == "__main__":
         which_latent=args.which_latent, which_phi=args.which_phi_e,
         stddev_group=args.stddev_group).to(device)
     
+    encoder_young_ema = Encoder(args.size, args.latent, channel_multiplier=args.channel_multiplier,
+        which_latent=args.which_latent, which_phi=args.which_phi_e,
+        stddev_group=args.stddev_group).to(device)
+    encoder_old_ema = Encoder(args.size, args.latent, channel_multiplier=args.channel_multiplier,
+        which_latent=args.which_latent, which_phi=args.which_phi_e,
+        stddev_group=args.stddev_group).to(device)
+
     e_reg_ratio = 1 #0.01
     e_young_optim = optim.Adam(
         encoder_young.parameters(),
@@ -484,6 +506,8 @@ if __name__ == "__main__":
 
         generator_young2old.load_state_dict(ckpt["g"])
         generator_old2young.load_state_dict(ckpt["g"])
+        generator_young2old_ema.load_state_dict(ckpt["g_ema"])
+        generator_old2young_ema.load_state_dict(ckpt["g_ema"])
         g_young2old_optim.load_state_dict(ckpt["g_optim"])
         g_old2young_optim.load_state_dict(ckpt["g_optim"])
 
@@ -494,6 +518,8 @@ if __name__ == "__main__":
 
         encoder_old.load_state_dict(ckpt["e"])
         encoder_young.load_state_dict(ckpt["e"])
+        encoder_old_ema.load_state_dict(ckpt["e_ema"])
+        encoder_young_ema.load_state_dict(ckpt["e_ema"])
         e_young_optim.load_state_dict(ckpt["e_optim"])
         e_old_optim.load_state_dict(ckpt["e_optim"])
 
@@ -510,6 +536,18 @@ if __name__ == "__main__":
             output_device=args.local_rank,
             broadcast_buffers=False,
         )
+        generator_young2old_ema = nn.parallel.DistributedDataParallel(
+            generator_young2old_ema,
+            device_ids=[args.local_rank],
+            output_device=args.local_rank,
+            broadcast_buffers=False,
+        )
+        generator_old2young_ema = nn.parallel.DistributedDataParallel(
+            generator_old2young_ema,
+            device_ids=[args.local_rank],
+            output_device=args.local_rank,
+            broadcast_buffers=False,
+        )
         encoder_young = nn.parallel.DistributedDataParallel(
             encoder_young,
             device_ids=[args.local_rank],
@@ -518,6 +556,18 @@ if __name__ == "__main__":
         )
         encoder_old = nn.parallel.DistributedDataParallel(
             encoder_old,
+            device_ids=[args.local_rank],
+            output_device=args.local_rank,
+            broadcast_buffers=False,
+        )
+        encoder_young_ema = nn.parallel.DistributedDataParallel(
+            encoder_young_ema,
+            device_ids=[args.local_rank],
+            output_device=args.local_rank,
+            broadcast_buffers=False,
+        )
+        encoder_old_ema = nn.parallel.DistributedDataParallel(
+            encoder_old_ema,
             device_ids=[args.local_rank],
             output_device=args.local_rank,
             broadcast_buffers=False,
@@ -569,7 +619,9 @@ if __name__ == "__main__":
     train(
         args, loader_young, loader_old, 
         generator_young2old, generator_old2young, 
+        generator_young2old_ema, generator_old2young_ema, 
         encoder_young, encoder_old,
+        encoder_young_ema, encoder_old_ema,
         discriminator_young, discriminator_old,
         vggnet, g_young2old_optim, g_old2young_optim, 
         e_young_optim, e_old_optim, 
