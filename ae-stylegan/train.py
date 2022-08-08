@@ -1222,19 +1222,29 @@ if __name__ == "__main__":
         except ValueError:
             pass
 
-        generator.load_state_dict(ckpt["g"])
-        encoder.load_state_dict(ckpt["e"])
-        discriminator.load_state_dict(ckpt["d"])
-        g_ema.load_state_dict(ckpt["g_ema"])
-        e_ema.load_state_dict(ckpt["e_ema"])
-
-        g_optim.load_state_dict(ckpt["g_optim"])
-        e_optim.load_state_dict(ckpt["e_optim"])
-        d_optim.load_state_dict(ckpt["d_optim"])
-
+        if "g" in ckpt:
+            generator.load_state_dict(ckpt["g"], strict=False)
+        if "e" in ckpt:
+            encoder.load_state_dict(ckpt["e"], strict=False)
+        if "d" in ckpt:
+            discriminator.load_state_dict(ckpt["d"], strict=False)
+        if "g_ema" in ckpt:
+            g_ema.load_state_dict(ckpt["g_ema"], strict=False)
+        if "e_ema" in ckpt:
+            e_ema.load_state_dict(ckpt["e_ema"], strict=False)
+        
+        if "g_optim" in ckpt:
+            g_optim.load_state_dict(ckpt["g_optim"])
+        if "e_optim" in ckpt:
+            e_optim.load_state_dict(ckpt["e_optim"])
+        if "d_optim" in ckpt:
+            d_optim.load_state_dict(ckpt["d_optim"])
+        
         if discriminator2 is not None:
-            discriminator2.load_state_dict(ckpt["d2"])
-            d2_optim.load_state_dict(ckpt["d2_optim"])
+            if "d2" in ckpt:
+                discriminator2.load_state_dict(ckpt["d2"], strict=False)
+            if "d2_optim" in ckpt:
+                d2_optim.load_state_dict(ckpt["d2_optim"])
 
     elif not args.train_from_scratch:
         if args.e_ckpt is not None:

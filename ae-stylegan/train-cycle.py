@@ -256,12 +256,7 @@ if __name__ == "__main__":
                         type=str,
                         choices=["cpu", "cuda"],
                         default="cuda")
-    parser.add_argument("--path-young",
-                        type=str,
-                        help="path to the lmdb dataset")
-    parser.add_argument("--path-old",
-                        type=str,
-                        help="path to the lmdb dataset")
+    parser.add_argument("--path", type=str, help="path to the celeba dataset")
     parser.add_argument("--arch",
                         type=str,
                         default='stylegan2',
@@ -709,14 +704,14 @@ if __name__ == "__main__":
         )
 
     # Create the datasets
-    dataset_young = get_image_dataset(args,
-                                      args.dataset,
-                                      args.path_young,
-                                      train=True)
-    dataset_old = get_image_dataset(args,
-                                    args.dataset,
-                                    args.path_old,
-                                    train=True)
+    dataset = get_image_dataset(args, args.dataset, args.path, train=True)
+
+    dataset_young = data.Subset(
+        dataset,
+        [idx for idx, _cls in enumerate(dataset.targets) if _cls == 0])
+    dataset_old = data.Subset(
+        dataset,
+        [idx for idx, _cls in enumerate(dataset.targets) if _cls == 1])
 
     if args.limit_train_batches < 1:
         indices = torch.randperm(

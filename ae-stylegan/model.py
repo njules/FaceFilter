@@ -5,7 +5,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from op import fused_leaky_relu, upfirdn2d, conv2d_gradfix
+from op import FusedLeakyReLU, fused_leaky_relu, upfirdn2d, conv2d_gradfix
 # from models.stylegan_layers import EqualizedLinear
 import pdb
 st = pdb.set_trace
@@ -389,7 +389,7 @@ class StyledConv(nn.Module):
         self.noise = NoiseInjection()
         # self.bias = nn.Parameter(torch.zeros(1, out_channel, 1, 1))
         # self.activate = ScaledLeakyReLU(0.2)
-        self.activate = nn.LeakyReLU()  # FusedLeakyReLU(out_channel)
+        self.activate = FusedLeakyReLU(out_channel)
 
     def forward(self, input, style, noise=None):
         out = self.conv(input, style)
@@ -696,7 +696,7 @@ class ConvLayer(nn.Sequential):
         )
 
         if activate:
-            layers.append(nn.LeakyReLU()) # BUG: missing bias here
+            layers.append(FusedLeakyReLU(out_channel, bias=bias)) # BUG: missing bias here
 
         super().__init__(*layers)
 
