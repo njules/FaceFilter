@@ -1207,6 +1207,7 @@ if __name__ == "__main__":
     # vggnet.load_state_dict(vgg_ckpt)
 
     if args.resume:
+        print(args.ckpt)
         if args.ckpt is None:
             args.ckpt = os.path.join(args.log_dir, 'weight', f"latest.pt")
         print("load model:", args.ckpt)

@@ -1,12 +1,17 @@
 import argparse
+from json import encoder
 import os
 import itertools as it
 
 import numpy as np
 import torch
+import torch.nn as nn
 from torch import nn, optim
 from torch.nn import functional as F
+from torchvision import datasets, transforms, utils
 from torch.utils import data
+from torch.utils.checkpoint import checkpoint
+import functools as ft
 from tqdm import tqdm
 import util
 from calc_inception import load_patched_inception_v3
@@ -18,16 +23,14 @@ st = pdb.set_trace
 from dataset import get_image_dataset
 from distributed import get_rank, synchronize
 
-from train import requires_grad, data_sampler
-from train import calculate_adaptive_weight, load_real_samples, accumulate  # calculate_adaptive_weight is for adversarial loss, load_real_samples for the FID
-from torchvision import utils
+from train import load_real_samples, requires_grad, data_sampler
 
 
+#@torch.no_grad()
 def train(args, loader_young, loader_old, generator_young2old,
           generator_old2young, encoder_young, encoder_old, discriminator_young,
           discriminator_old, vggnet, g_young2old_optim, g_old2young_optim,
-          e_young_optim, e_old_optim, d_young_optim, d_old_optim, e_ema_young,
-          g_ema_young2old, e_ema_old, g_ema_old2young, device):
+          e_young_optim, e_old_optim, d_young_optim, d_old_optim, device):
 
     inception = real_mean = real_cov = mean_latent = None
     if args.eval_every > 0:
@@ -48,72 +51,126 @@ def train(args, loader_young, loader_old, generator_young2old,
 
     pbar = range(args.iter)
     if get_rank() == 0:
-        pbar = tqdm(pbar,
-                    initial=args.start_iter,
-                    dynamic_ncols=True,
-                    smoothing=0.01)
+        pbar = tqdm(pbar, initial=0, dynamic_ncols=True, smoothing=0.01)
 
     loader_young, loader_old = it.cycle(loader_young), it.cycle(loader_old)
 
-    requires_grad(g_ema, False)
-    requires_grad(e_ema, False)
+    sample_young = load_real_samples(args, loader_young).to(device)
+    sample_old = load_real_samples(args, loader_old).to(device)
 
-    sample_z = torch.randn(args.n_sample, args.latent, device=device)
-    sample_x = load_real_samples(
-        args, loader_young)  # for the moment I load young photos
-    if sample_x.ndim > 4:
-        sample_x = sample_x[:, 0, ...]
-
-    input_is_latent = args.latent_space != 'z'  # Encode in z space?
-
-    for idx in pbar:
-        i = idx + args.start_iter
+    for idx in range(args.iter):  #pbar:
+        i = idx
 
         if i > args.iter:
             print("Done!")
             break
 
+        print(f"Step {idx}")
+
         if args.debug: util.seed_everything(i)
 
-        real_young_imgs = next(loader_young)[0]
-        real_old_imgs = next(loader_old)[0]
+        real_young_imgs = next(loader_young)[0].to(device)
+        real_old_imgs = next(loader_old)[0].to(device)
 
+        print(real_young_imgs.shape)
+
+        e_young_optim.zero_grad()
+        g_young2old_optim.zero_grad()
+        d_old_optim.zero_grad()
+        e_old_optim.zero_grad()
+        g_old2young_optim.zero_grad()
+        d_young_optim.zero_grad()
+
+        loss = 0
+
+        ###################################################
+        #  Part 1: Real Young -> Rec. Old -> Young again  #
+        ###################################################
+
+        # train the first half of the network
         requires_grad(encoder_young, True)
         requires_grad(generator_young2old, True)
         requires_grad(discriminator_old, True)
+
+        requires_grad(encoder_old, False)
+        requires_grad(generator_old2young, False)
+        requires_grad(discriminator_young, False)
+
+        # encode the young images into the latent space
+        latent_young_real, _ = encoder_young(real_young_imgs)
+        # reconstruct the images in the second domain
+        rec_young2old, _ = checkpoint(
+            ft.partial(generator_young2old, input_is_latent=True),
+            latent_young_real)
+        # encode the rec. old images into the latent space
+        latent_old_rec, _ = checkpoint(encoder_old, rec_young2old)
+        # reconstruct the images in the original domain
+        rec_young, _ = checkpoint(
+            ft.partial(generator_old2young, input_is_latent=True),
+            latent_old_rec)
+
+        # compute the prediction for the reconstructed images and the real ones
+        real_pred = discriminator_old(real_old_imgs)
+        fake_pred = checkpoint(discriminator_old, rec_young2old)
+
+        d_old_loss_fake = F.softplus(fake_pred).mean()
+        d_old_loss_real = F.softplus(-real_pred).mean()
+
+        # Reconstruction loss
+        pix_loss, vgg_loss = 0, 0
+
+        if args.lambda_pix > 0:
+            assert rec_young.requires_grad
+            # pixel to pixel difference of reconstructed and real image
+            if args.pix_loss == 'l2':
+                pix_loss = torch.mean((rec_young - real_young_imgs)**2)
+            elif args.pix_loss == 'l1':
+                pix_loss = F.l1_loss(rec_young, real_young_imgs)
+
+        if args.lambda_vgg > 0:
+            # use a vgg network to compute the difference between the features of real
+            # and reconstructed images
+            vgg_loss = torch.mean(
+                (vggnet(real_young_imgs) - vggnet(rec_young))**2)
+
+        (d_old_loss_fake + d_old_loss_real + args.lambda_pix * pix_loss +
+         args.lambda_vgg * vgg_loss).backward()
+        e_young_optim.step()
+        g_young2old_optim.step()
+        d_old_optim.step()
+
+        print(
+            f"First step: {d_old_loss_fake} - {d_old_loss_real} - {pix_loss}")
+
+        #################################################
+        #  Part 2: Real Old -> Rec. Young -> Old again  #
+        #################################################
+
+        # train the second half of the network
+        requires_grad(encoder_young, False)
+        requires_grad(generator_young2old, False)
+        requires_grad(discriminator_old, False)
 
         requires_grad(encoder_old, True)
         requires_grad(generator_old2young, True)
         requires_grad(discriminator_young, True)
 
-        ##########################
-        #  Part 1: Young -> Old  #
-        ##########################
-
-        # encode the young images into the latent space
-        latent_young_real, _ = encoder_young(real_young_imgs)
+        # encode the old images into the latent space
+        latent_old_real, _ = encoder_old(real_old_imgs)
         # reconstruct the images in the second domain
-        rec_young2old, _ = generator_young2old([latent_young_real])
-        # compute the prediction for the reconstructed images and the real ones
-        # TODO: add augmentations? <-  doing this following the papers will not improve the training time, I don't know about the performance but since CelebA is just portraits images I don't thing that we will have betters results
-        real_pred = discriminator_old(real_old_imgs)
-        fake_pred = discriminator_old(rec_young2old)
-
-        d_old_loss_fake = F.softplus(fake_pred).mean()
-        d_old_loss_real = F.softplus(-real_pred).mean()
-
-        ##########################
-        #  Part 2: Old -> Young  #
-        ##########################
-
-        # encode the rec. old images into the latent space
-        latent_old_rec, _ = encoder_old(rec_young2old)
+        rec_old2young, _ = checkpoint(
+            ft.partial(generator_old2young, input_is_latent=True),
+            latent_old_real)
+        # encode the rec. young images into the latent space
+        latent_young_rec, _ = checkpoint(encoder_young, rec_old2young)
         # reconstruct the images in the original domain
-        rec_old2young, _ = generator_old2young([latent_old_rec])
+        rec_old, _ = checkpoint(
+            ft.partial(generator_young2old, input_is_latent=True),
+            latent_young_rec)
+
         # compute the prediction for the reconstructed images and the real ones
-        # TODO: add augmentations?
         real_pred = discriminator_young(real_young_imgs)
-        fake_pred = discriminator_old(rec_old2young)
+        fake_pred = checkpoint(discriminator_young, rec_old2young)
 
         d_young_loss_fake = F.softplus(fake_pred).mean()
         d_young_loss_real = F.softplus(-real_pred).mean()
@@ -124,72 +181,141 @@ def train(args, loader_young, loader_old, generator_young2old,
         if args.lambda_pix > 0:
             # pixel to pixel difference of reconstructed and real image
             if args.pix_loss == 'l2':
-                pix_loss = torch.mean((rec_old2young - real_young_imgs)**2)
+                pix_loss = torch.mean((rec_old - real_old_imgs)**2)
             elif args.pix_loss == 'l1':
-                pix_loss = F.l1_loss(rec_old2young, real_young_imgs)
-            else:
-                raise NotImplementedError
+                pix_loss = F.l1_loss(rec_old, real_old_imgs)
 
         if args.lambda_vgg > 0:
             # use a vgg network to compute the difference between the features of real
             # and reconstructed images
-            vgg_loss = torch.mean(
-                (vggnet(real_young_imgs) - vggnet(rec_old2young))**2)
+            vgg_loss = torch.mean((vggnet(real_old_imgs) - vggnet(rec_old))**2)
 
-        # TODO: skipped the adversarial loss
-        if args.lambda_adv > 0:
-            # usual adversarial loss
-            if not args.decouple_d:  # with the fact that we use the join one we can leave only the else
-                rec_pred = discriminator_young(rec_old2young)
-            else:
-                rec_pred = discriminator_old(rec_old2young)
-            adv_loss = F.softplus(-rec_pred).mean(
-            )  # following the g_nonsaturating_loss in train.py
+        (d_young_loss_fake + d_young_loss_real + args.lambda_pix * pix_loss +
+         args.lambda_vgg * vgg_loss).backward()
+        e_old_optim.step()
+        g_old2young_optim.step()
+        d_young_optim.step()
+
+        print(
+            f"Second step: {d_young_loss_fake} - {d_young_loss_real} - {pix_loss}"
+        )
 
         #####################
         #  Backpropagation  #
         #####################
 
-        e_young_optim.zero_grad()
-        g_young2old_optim.zero_grad()
-        d_old_optim.zero_grad()
-        e_old_optim.zero_grad()
-        g_old2young_optim.zero_grad()
-        d_young_optim.zero_grad()
+        del real_young_imgs
+        del real_old_imgs
 
-        loss = d_young_loss_fake + d_young_loss_real
-        loss += d_old_loss_fake + d_old_loss_real
-        loss += pix_loss * args.lambda_pix + vgg_loss * args.lambda_vgg
-        # add adversarial loss
-        g_loss = adv_loss * args.lambda_adv
-        last_layer = None
-        if args.use_adaptive_weight:
-            if args.distributed:
-                last_layer = generator_old2young.module.get_last_layer()
-            else:
-                last_layer = generator_old2young.get_last_layer()
-        d_weight = calculate_adaptive_weight(loss,
-                                             g_loss,
-                                             last_layer=last_layer)
-        loss += d_weight * g_loss
+        #nn.utils.clip_grad_value_(encoder_young.parameters(), clip_value=1.0)
+        #nn.utils.clip_grad_value_(encoder_old.parameters(), clip_value=1.0)
+        #nn.utils.clip_grad_value_(generator_old2young.parameters(), clip_value=1.0)
+        #nn.utils.clip_grad_value_(generator_young2old.parameters(), clip_value=1.0)
+        #nn.utils.clip_grad_value_(discriminator_old.parameters(), clip_value=1.0)
+        #nn.utils.clip_grad_value_(discriminator_young.parameters(), clip_value=1.0)
 
-        loss.backward()
-
-        e_young_optim.step()
-        g_young2old_optim.step()
-        d_old_optim.step()
-        e_old_optim.step()
-        g_old2young_optim.step()
-        d_young_optim.step()
+        #print("e_young: " + str(any(torch.any(torch.isnan(p.grad)) for p in encoder_young.parameters())))
+        #print("e_old: " + str(any(torch.any(torch.isnan(p.grad)) for p in encoder_old.parameters())))
+        #print("g_old: " + str(any(torch.any(torch.isnan(p.grad)) for p in generator_old2young.parameters())))
+        #print("g_young: " + str(any(torch.any(torch.isnan(p.grad)) for p in generator_young2old.parameters())))
+        #print("d_old: " + str(any(torch.any(torch.isnan(p.grad)) for p in discriminator_old.parameters())))
+        #print("d_young: " + str(any(torch.any(torch.isnan(p.grad)) for p in discriminator_old.parameters())))
 
         if get_rank() == 0:
-            print(
-                f"d_young_loss_fake: {d_young_loss_fake:.4f}; d_young_loss_real: {d_young_loss_real:.4f}"
-            )
-            print(
-                f"d_old_loss_fake: {d_old_loss_fake:.4f}; d_old_loss_real: {d_old_loss_real:.4f}"
-            )
-            print(f"pix_loss: {pix_loss:.4f}; vgg_loss: {vgg_loss:.4f}")
+            #print(f"d_young_loss_fake: {d_young_loss_fake:.4f}; d_young_loss_real: {d_young_loss_real:.4f}")
+            # print(f"d_old_loss_fake: {d_old_loss_fake:.4f}; d_old_loss_real: {d_old_loss_real:.4f}")
+            #print(f"pix_loss: {pix_loss:.4f}; vgg_loss: {vgg_loss:.4f}")
+            pass
+
+        if get_rank() == 0:
+
+            # Evaluation
+            if args.eval_every > 0 and i % args.eval_every == 0:
+                with torch.no_grad():
+                    fid_sa = fid_re = fid_sr = 0
+
+                    encoder_old.eval()
+                    encoder_young.eval()
+                    generator_old2young.eval()
+                    generator_young2old.eval()
+
+                    nrow = int(args.n_sample**0.5)
+                    nchw = list(sample_young.shape)[1:]
+
+                    # Reconstruction of young images
+                    latent_x, _ = encoder_young(sample_young)
+                    rec_old, _ = generator_young2old([latent_x],
+                                                     input_is_latent=True)
+                    latent_x, _ = encoder_old(rec_old)
+                    rec_young, _ = generator_old2young([latent_x],
+                                                       input_is_latent=True)
+                    sample = torch.cat(
+                        (sample_young.reshape(args.n_sample // nrow, nrow, *
+                                              nchw),
+                         rec_old.reshape(args.n_sample // nrow, nrow, *nchw)),
+                        1)
+                    utils.save_image(
+                        sample.reshape(2 * args.n_sample, *nchw),
+                        os.path.join(args.log_dir, 'sample',
+                                     f"{str(i).zfill(6)}-young2old.png"),
+                        nrow=nrow,
+                        normalize=True,
+                    )
+                    sample = torch.cat(
+                        (sample_young.reshape(args.n_sample // nrow, nrow, *
+                                              nchw),
+                         rec_young.reshape(args.n_sample // nrow, nrow, *
+                                           nchw)), 1)
+                    utils.save_image(
+                        sample.reshape(2 * args.n_sample, *nchw),
+                        os.path.join(args.log_dir, 'sample',
+                                     f"{str(i).zfill(6)}-recon.png"),
+                        nrow=nrow,
+                        normalize=True,
+                    )
+
+                    # Reconstruction of old images
+                    latent_x, _ = encoder_old(sample_old)
+                    rec_young, _ = generator_old2young([latent_x],
+                                                       input_is_latent=True)
+                    sample = torch.cat(
+                        (sample_old.reshape(args.n_sample // nrow, nrow, *
+                                            nchw),
+                         rec_young.reshape(args.n_sample // nrow, nrow, *
+                                           nchw)), 1)
+                    utils.save_image(
+                        sample.reshape(2 * args.n_sample, *nchw),
+                        os.path.join(args.log_dir, 'sample',
+                                     f"{str(i).zfill(6)}-old2young.png"),
+                        nrow=nrow,
+                        normalize=True,
+                    )
+
+                    # ref_pix_loss = torch.sum(torch.abs(sample_x - rec_real_2))
+                    # ref_vgg_loss = torch.mean(
+                    #     (vggnet(sample_x) -
+                    #      vggnet(rec_real_2))**2) if vggnet is not None else 0
+                    # # Fixed fake samples and reconstructions
+                    # sample_gz, _ = g_ema_young2old([sample_z])
+                    # latent_gz, _ = e_ema_old(sample_gz)
+                    # sample_gz_2, _ = g_ema_old2young([latent_gz_2])
+                    # latent_gz_2, _ = e_ema_young(sample_gz_2)
+                    # rec_fake, _ = g_ema_young2old(
+                    #     [latent_gz_2], input_is_latent=input_is_latent)
+                    # sample = torch.cat(
+                    #     (sample_gz.reshape(args.n_sample // nrow, nrow, *nchw),
+                    #      rec_fake.reshape(args.n_sample // nrow, nrow, *nchw)),
+                    #     1)
+                    # utils.save_image(
+                    #     sample.reshape(2 * args.n_sample, *nchw),
+                    #     os.path.join(args.log_dir, 'sample',
+                    #                  f"{str(i).zfill(6)}-sample.png"),
+                    #     nrow=nrow,
+                    #     normalize=True,
+                    #     # value_range=(-1, 1),
+                    # )
+                    # gz_pix_loss = torch.sum(torch.abs(sample_gz - rec_fake))
+                    # gz_vgg_loss = torch.mean((vggnet(sample_gz) - vggnet(rec_fake)) ** 2) if vggnet is not None else 0
 
             # Evaluation
             if args.eval_every > 0 and i % args.eval_every == 0:
@@ -528,8 +654,8 @@ if __name__ == "__main__":
         args.latent,
         args.n_mlp_g,
         channel_multiplier=args.channel_multiplier).to(device)
-    g_reg_ratio = args.g_reg_every / (args.g_reg_every +
-                                      1) if args.g_reg_every > 0 else 1.
+    #g_reg_ratio = args.g_reg_every / (args.g_reg_every + 1) if args.g_reg_every > 0 else 1.
+    g_reg_ratio = 1  # 0.01
 
     g_young2old_optim = optim.Adam(
         generator_young2old.parameters(),
@@ -537,7 +663,7 @@ if __name__ == "__main__":
         betas=(0**g_reg_ratio, 0.99**g_reg_ratio),
     )
     g_old2young_optim = optim.Adam(
-        generator_young2old.parameters(),
+        generator_old2young.parameters(),
         lr=args.lr * g_reg_ratio,
         betas=(0**g_reg_ratio, 0.99**g_reg_ratio),
     )
@@ -567,8 +693,8 @@ if __name__ == "__main__":
         args.size,
         channel_multiplier=args.channel_multiplier,
         which_phi=args.which_phi_d).to(device)
-    d_reg_ratio = args.d_reg_every / (args.d_reg_every +
-                                      1) if args.d_reg_every > 0 else 1.
+    # d_reg_ratio = args.d_reg_every / (args.d_reg_every + 1) if args.d_reg_every > 0 else 1.
+    d_reg_ratio = 1
 
     d_old_optim = optim.Adam(
         discriminator_old.parameters(),
@@ -577,7 +703,7 @@ if __name__ == "__main__":
     )
 
     d_young_optim = optim.Adam(
-        discriminator_old.parameters(),
+        discriminator_young.parameters(),
         lr=args.lr * d_reg_ratio,
         betas=(0**d_reg_ratio, 0.99**d_reg_ratio),
     )
@@ -597,7 +723,7 @@ if __name__ == "__main__":
                           which_phi=args.which_phi_e,
                           stddev_group=args.stddev_group).to(device)
 
-    e_reg_ratio = 1.
+    e_reg_ratio = 1  #0.01
     e_young_optim = optim.Adam(
         encoder_young.parameters(),
         lr=args.lr * e_reg_ratio,
@@ -655,12 +781,18 @@ if __name__ == "__main__":
 
         generator_young2old.load_state_dict(ckpt["g"])
         generator_old2young.load_state_dict(ckpt["g"])
+        g_young2old_optim.load_state_dict(ckpt["g_optim"])
+        g_old2young_optim.load_state_dict(ckpt["g_optim"])
 
         discriminator_old.load_state_dict(ckpt["d"])
         discriminator_young.load_state_dict(ckpt["d"])
+        d_old_optim.load_state_dict(ckpt["d_optim"])
+        d_young_optim.load_state_dict(ckpt["d_optim"])
 
         encoder_old.load_state_dict(ckpt["e"])
         encoder_young.load_state_dict(ckpt["e"])
+        e_young_optim.load_state_dict(ckpt["e_optim"])
+        e_old_optim.load_state_dict(ckpt["e_optim"])
 
         g_ema.load_state_dict(ckpt["g_ema"])
         e_ema.load_state_dict(ckpt["e_ema"])
@@ -743,20 +875,8 @@ if __name__ == "__main__":
         num_workers=args.num_workers,
     )
 
-    # TODO: evaluation
-
-    # A subset of length args.n_sample_fid for FID evaluation
-    # loader2 = None
-    # if args.eval_every > 0:
-    #     indices = torch.randperm(len(dataset))[:args.n_sample_fid]
-    #     dataset2 = data.Subset(dataset, indices)
-    #     loader2 = data.DataLoader(dataset2, batch_size=64, num_workers=4, shuffle=False)
-    #     if args.sample_cache is not None:
-    #         load_real_samples(args, sample_data(loader2))
-
-    # # if get_rank() == 0 and wandb is not None and args.wandb:
-    # #     wandb.init(project=args.name)
-    # util.print_models([generator, discriminator, encoder], args)
+    print(f"Length of loader_young: {len(loader_young)}")
+    print(f"Length of loader_old: {len(loader_old)}")
 
     train(args, loader_young, loader_old, generator_young2old,
           generator_old2young, encoder_young, encoder_old, discriminator_young,

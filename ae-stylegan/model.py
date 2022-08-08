@@ -590,6 +590,9 @@ class Generator(nn.Module):
         randomize_noise=True,
         detach_style=False,
     ):
+        if not isinstance(styles, list):
+            styles = [styles]
+
         if not input_is_latent:  # if `style' is z, then get w = self.style(z)
             styles = [self.get_latent(s, detach=detach_style) for s in styles]
 
