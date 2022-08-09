@@ -5,13 +5,13 @@
 #SBATCH --mail-user=s286886@studenti.polito.it
 #SBATCH --workdir=/home/mla_group_13/FaceFilter/ae-stylegan
 #SBATCH --partition=cuda
-#SBATCH --time=12:00:00
+#SBATCH --time=04:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
 #SBATCH --output=/home/mla_group_13/experiments_output/cycle-stylegan_%j.log
 #SBATCH --mem=8G
-#SBATCH --gres=gpu:1
+#SBATCH --gpus-per-node=1
 
 module load nvidia/cudasdk/11.6
 module load intel/python/3/2019.4.088
@@ -46,7 +46,7 @@ python train-cycle-ema.py \
 --log_root /home/mla_group_13/experiments_output/cycle-stylegan_${SLURM_JOB_ID}/ \
 --resume \
 --ckpt /home/mla_group_13/experiments_output/ae-stylegan_266738/ffhq_aegan_wplus_joint/weight/075000.pt \
---iter 500 \
+--iter 300 \
 --size 128 \
 --name ffhq_aegan_wplus_joint \
 --log_every 1 \
@@ -56,7 +56,7 @@ python train-cycle-ema.py \
 --inception inception_ffhq128.pkl \
 --n_sample_fid 10000 \
 --batch 32 \
---lr 0.0001 \
+--lr 0.00001 \
 --r1 0.2048 \
 --ema_kimg 5 \
 --disc_iter_start 30000 \
