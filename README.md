@@ -10,8 +10,7 @@ The starting point of AE-StyleGAN is take from the following [**repo**](https://
 Our contribution is mainly focus on the use of CelebA dataset on the two system and on the Cycle-StyleGAN, that is base on the previously cited AE-StyleGAN. 
 
 # Scripts details:
-``` note (mattia): If I'm not wrong the data_loader_cyclegan.py it can be removed. ``` 
-* image_folder_cyclegan.py and data_loader_cyclegan.py: it allow to use CelebA dataset to the FaceAging-by-cycleGAN architecture. There are basically custom files of the one present in the repo.
+* image_folder_cyclegan.py: it allow to use CelebA dataset to the FaceAging-by-cycleGAN architecture. There are basically custom files of the one present in the repo.
 * split-celaba.py: it allow to create the test, validation and train split of the selected dataset.
 * sample-celeba.py: it allow use to split the sub-dataset (*train*, *validation*, *test*) base on the attribute will create 2 sub-folders (in this case the **young** and **old** one), it will not copy the source image to the destination file, it will just create a link.
 * train_cyclegan.py: is the train.py customized for our task. 
@@ -25,7 +24,6 @@ Inside this folder you can find an example of sbatch script for run the differen
 * run_ae_cycle_stylegan.sbatch: for train the Cycle-StyleGAN pretrained on StyleGAN.
 
 # List of task to do before running any experiment.
-```note (mattia): with this part I think we can also remove the command_list.md file```
 * Clone this repo and clone inside the [FaceAging-by-cycleGAN repo](https://github.com/jiechen2358/FaceAging-by-cycleGAN.git)
 * Create the environment: with torchvision and the requirement present on FaceAging-by-cycleGAN/requirements.txt
     ```bash
