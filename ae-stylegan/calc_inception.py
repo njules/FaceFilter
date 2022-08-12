@@ -4,6 +4,7 @@ import os
 
 import torch
 from torch import nn
+from torch.utils import data
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, Subset
 from torchvision import transforms, datasets
@@ -104,7 +105,8 @@ if __name__ == "__main__":
     parser.add_argument("--name", type=str, default=None, help="name of inception embedding file")
     parser.add_argument("--dataset", type=str, default='multires')
     parser.add_argument("--cache", type=str, default=None)
-    parser.add_argument("path", metavar="PATH", help="path to datset lmdb file")
+    parser.add_argument("--by-class", type=str, choices=['young', 'old'], default=None)
+    parser.add_argument("--path", metavar="PATH", help="path to datset lmdb file")
 
     args = parser.parse_args()
 
@@ -146,8 +148,10 @@ if __name__ == "__main__":
         dset = get_image_dataset(args, args.dataset, args.path, train=args.eval_type=='train')
 
     # args.n_sample = min(args.n_sample, len(dset))
-    indices = torch.randperm(len(dset))[:args.n_sample]
-    dset = Subset(dset, indices)
+    if args.by_class is not None:
+        target = 1 if args.by_class == 'young' else 0
+        dset = data.Subset(dset, [idx for idx, _cls in enumerate(dset.targets) if _cls == target])
+    
     loader = DataLoader(dset, batch_size=args.batch, num_workers=4, shuffle=True)
 
     features = extract_features(loader, inception, device).numpy()
@@ -160,6 +164,8 @@ if __name__ == "__main__":
     cov = np.cov(features, rowvar=False)
 
     name = args.name or os.path.splitext(os.path.basename(args.path))[0]
+    if args.by_class is not None:
+        name = f"{name}_{args.by_class}"
 
     with open(f"inception_{name}.pkl", "wb") as f:
         pickle.dump({"mean": mean, "cov": cov, "size": args.size, "path": args.path}, f)
