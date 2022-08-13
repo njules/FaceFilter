@@ -1,7 +1,7 @@
 # Face Aging with Generative Adversarial Network Project Report
 This project was developed for 01URXOV - Machine Learning in Applications (spring semester 2022) of Politecnico of Turin.
 
-The project was developed by: Mattia Dutto, Julian Neubert, Simone Peirone.
+The project was developed by: Mattia Dutto, Julian Neubert, Simone Alberto Peirone.
 
 # Contributions
 The starting point is the repo [**FaceAgin-by-cycleGAN**](https://github.com/jiechen2358/FaceAging-by-cycleGAN.git) that it used for the baseline approach. 
