@@ -1,3 +1,5 @@
+# TODO: implement batch processing
+
 import argparse
 from dataset import CenterCropLongEdge
 from model import Encoder, Generator
@@ -87,15 +89,15 @@ def parse_args():
     )
     parser.add_argument(
         '--out', type=str, default=None,
-        help="File the mixed image should be stored in."
+        help="File the mixed image should be stored in"
     )
     parser.add_argument(
         '--model-path', type=str,
-        help="Path to the model weights."
+        help="Path to the model weights"
     )
     parser.add_argument(
         "--image-size", type=int, default=128,
-        help="Size of the (square) images provided"
+        help="Height and Width of the input images for the model"
     )
     parser.add_argument(
         "--latent-size", type=int, default=512,
