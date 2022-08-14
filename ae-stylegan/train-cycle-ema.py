@@ -22,6 +22,7 @@ st = pdb.set_trace
 from dataset import get_image_dataset
 from distributed import get_rank, synchronize
 
+from fid import extract_feature_from_samples, calc_fid, extract_feature_from_reconstruction
 from train import load_real_samples, requires_grad, data_sampler, accumulate, d_r1_loss
 
 
@@ -38,15 +39,21 @@ def train(args, loader_young, loader_old,
         d_young_optim, d_old_optim, 
         device):
 
-    inception = real_mean = real_cov = mean_latent = None
-    if args.eval_every > 0:
-        if any(metric.startswith("fid") for metric in args.which_metric):
-            inception = nn.DataParallel(load_patched_inception_v3()).to(device)
-            inception.eval()
-            with open(args.inception, "rb") as f:
-                embeds = pickle.load(f)
-                real_mean = embeds["mean"]
-                real_cov = embeds["cov"]
+    inception = mean_latent = None
+    real_mean_young = real_cov_young = None
+    real_mean_old = real_cov_old = None
+
+    if args.eval_every > 0 and len(args.which_metric) > 0:
+        inception = nn.DataParallel(load_patched_inception_v3()).to(device)
+        inception.eval()
+
+        with open(args.inception_young, "rb") as f:
+            embeds = pickle.load(f)
+            real_mean_young, real_cov_young = embeds["mean"], embeds["cov"]
+        with open(args.inception_old, "rb") as f:
+            embeds = pickle.load(f)
+            real_mean_old, real_cov_old = embeds["mean"], embeds["cov"]
+
     if get_rank() == 0:
         if args.eval_every > 0:
             with open(os.path.join(args.log_dir, 'log_fid.txt'), 'a+') as f:
@@ -321,6 +328,37 @@ def train(args, loader_young, loader_old,
                         normalize=True,
                     )
 
+                    fid_young, fid_old = 0, 0 
+                    
+                    if 'fid_old' in args.which_metric:
+                        if args.truncation < 1:
+                            mean_latent = generator_young2old_ema.mean_latent(4096)
+                        features = extract_feature_from_reconstruction(
+                            encoder_young_ema, generator_young2old_ema,
+                            inception, args.truncation,
+                            mean_latent, it.islice(test_loader_young, args.n_sample_fid // args.batch),
+                            args.device, input_is_latent=True, mode='recon',
+                        ).numpy()
+                        sample_old_mean = np.mean(features, 0)
+                        sample_old_cov = np.cov(features, rowvar=False)
+                        fid_old = calc_fid(sample_old_mean, sample_old_cov, real_mean_old, real_cov_old)
+
+                    if 'fid_young' in args.which_metric:
+                        if args.truncation < 1:
+                            mean_latent = generator_old2young_ema.mean_latent(4096)
+                        features = extract_feature_from_reconstruction(
+                            encoder_old_ema, generator_old2young_ema,
+                            inception, args.truncation,
+                            mean_latent, it.islice(test_loader_old, args.n_sample_fid // args.batch),
+                            args.device, input_is_latent=True, mode='recon',
+                        ).numpy()
+                        sample_young_mean = np.mean(features, 0)
+                        sample_young_cov = np.cov(features, rowvar=False)
+                        fid_young = calc_fid(sample_young_mean, sample_young_cov, real_mean_young, real_cov_young)
+
+                    with open(os.path.join(args.log_dir, 'log_fid.txt'), 'a+') as f:
+                        f.write(f"{i:07d}; fid_young: {float(fid_young):.4f}; fid_old: {float(fid_old):.4f};\n")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="StyleGAN2 trainer")
@@ -374,7 +412,8 @@ if __name__ == "__main__":
     parser.add_argument("--lambda_rec_w", type=float, default=0, help="recon sampled w")
     parser.add_argument("--pix_loss", type=str, default='l2')
     parser.add_argument("--joint", action='store_true', help="update generator with encoder")
-    parser.add_argument("--inception", type=str, default=None, help="path to precomputed inception embedding")
+    parser.add_argument("--inception_young", type=str, default=None, help="path to precomputed inception embedding")
+    parser.add_argument("--inception_old", type=str, default=None, help="path to precomputed inception embedding")
     parser.add_argument("--eval_every", type=int, default=1000, help="interval of metric evaluation")
     parser.add_argument("--truncation", type=float, default=1, help="truncation factor")
     parser.add_argument("--n_sample_fid", type=int, default=50000, help="number of the samples for calculating FID")
@@ -395,7 +434,7 @@ if __name__ == "__main__":
     parser.add_argument("--ema_rampup", type=float, default=None, help="EMA ramp-up coefficient.")
     parser.add_argument("--no_ema_e", action='store_true')
     parser.add_argument("--no_ema_g", action='store_true')
-    parser.add_argument("--which_metric", type=str, nargs='*', choices=['fid_sample', 'fid_sample_recon', 'fid_recon'], default=[])
+    parser.add_argument("--which_metric", type=str, nargs='*', choices=['fid_young', 'fid_old'], default=[])
     parser.add_argument("--use_adaptive_weight", action='store_true', help="adaptive weight borrowed from VQGAN")
     parser.add_argument("--disc_iter_start", type=int, default=30000)
     parser.add_argument("--which_phi_e", type=str, default='lin2')

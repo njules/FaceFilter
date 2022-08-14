@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=AE-StyleGAN-Base-Model
+#SBATCH --job-name=AE-StyleGAN-E-10
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=s287598@studenti.polito.it
 #SBATCH --workdir=/home/mla_group_13/FaceFilter/ae-stylegan
@@ -24,7 +24,7 @@ if [ -z $CUDA_VISIBLE_DEVICES ]; then
     device="cpu"
 fi
 
-n_step_e=1
+n_step_e=10
 
 lambda_rec_w=0
 lambda_rec_d=0.25
@@ -49,7 +49,7 @@ python train.py \
 --save_every 1000 \
 --eval_every 50 \
 --dataset imagefolder \
---inception inception_ffhq.pkl \
+--inception inception_celeba.pkl \
 --n_sample_fid 10000 \
 --lambda_rec_d $lambda_rec_d \
 --lambda_fake_d $lambda_fake_d \
